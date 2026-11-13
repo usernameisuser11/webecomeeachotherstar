@@ -38,52 +38,70 @@ function valueNoise(x: number, seed: number) {
   return (hash1(i, seed) + (hash1(i + 1, seed) - hash1(i, seed)) * u) * 2 - 1;
 }
 
-type Peak = { x: number; width: number; height: number; left?: number; right?: number };
-type RidgeConfig = { base: number; roughness: number; seed: number; peaks: Peak[]; top: string; bottom: string; opacity?: number };
+type RidgePoint = { x: number; height: number };
+type RidgeConfig = { base: number; roughness: number; seed: number; profile: RidgePoint[]; top: string; bottom: string; opacity?: number };
 const farRidge: RidgeConfig = {
-  base: .783, roughness: .052, seed: 4.9, top: "#364260", bottom: "#14253f", opacity: .91,
-  peaks: [
-    { x: .10, width: .13, height: .057, left: 1.1, right: .8 },
-    { x: .275, width: .125, height: .116, left: 1.38, right: .80 },
-    { x: .50, width: .12, height: .045, left: 1.0, right: 1.25 },
-    { x: .64, width: .125, height: .067, left: 1.06, right: 1.1 },
-    { x: .85, width: .14, height: .089, left: 1.25, right: .78 },
+  base: .803, roughness: .020, seed: 4.9, top: "#364260", bottom: "#14253f", opacity: .91,
+  profile: [
+    { x: -.12, height: .026 }, { x: .00, height: .047 },
+    { x: .09, height: .064 }, { x: .17, height: .052 },
+    { x: .23, height: .083 }, { x: .29, height: .137 },
+    { x: .34, height: .101 }, { x: .41, height: .074 },
+    { x: .50, height: .092 }, { x: .57, height: .068 },
+    { x: .65, height: .093 }, { x: .72, height: .119 },
+    { x: .79, height: .085 }, { x: .88, height: .105 },
+    { x: .96, height: .073 }, { x: 1.12, height: .048 },
   ],
 };
 const middleRidge: RidgeConfig = {
-  base: .837, roughness: .043, seed: 12.7, top: "#233451", bottom: "#081a31",
-  peaks: [
-    { x: .055, width: .13, height: .068, left: .75, right: 1.38 },
-    { x: .37, width: .15, height: .089, left: 1.42, right: .87 },
-    { x: .68, width: .135, height: .105, left: .91, right: 1.26 },
-    { x: .94, width: .11, height: .057, left: 1.4, right: .8 },
+  base: .860, roughness: .014, seed: 12.7, top: "#233451", bottom: "#081a31",
+  profile: [
+    { x: -.12, height: .037 }, { x: .00, height: .076 },
+    { x: .06, height: .092 }, { x: .14, height: .058 },
+    { x: .22, height: .045 }, { x: .29, height: .062 },
+    { x: .38, height: .108 }, { x: .46, height: .073 },
+    { x: .53, height: .058 }, { x: .60, height: .081 },
+    { x: .69, height: .122 }, { x: .75, height: .090 },
+    { x: .84, height: .066 }, { x: .90, height: .084 },
+    { x: .97, height: .073 }, { x: 1.12, height: .047 },
   ],
 };
 const shoreRidge: RidgeConfig = {
-  base: .910, roughness: .012, seed: 23.6, top: "#0b1a2a", bottom: "#010813",
-  peaks: [
-    { x: .04, width: .18, height: .025 },
-    { x: .47, width: .23, height: .021 },
-    { x: .91, width: .18, height: .033 },
+  base: .920, roughness: .004, seed: 23.6, top: "#0b1a2a", bottom: "#010813",
+  profile: [
+    { x: -.12, height: .018 }, { x: .00, height: .026 },
+    { x: .18, height: .018 }, { x: .31, height: .014 },
+    { x: .47, height: .029 }, { x: .58, height: .022 },
+    { x: .73, height: .015 }, { x: .85, height: .028 },
+    { x: .93, height: .040 }, { x: 1.12, height: .020 },
   ],
 };
 
-function mountainHeight(t: number, cfg: RidgeConfig) {
-  // Overlapping, asymmetric Gaussian swells avoid the triangular peak seams
-  // created by max() and fractional-power wedges. Terrain noise remains low.
-  const naturalUndulation =
-    valueNoise(t * 1.5 + .7, cfg.seed) * .58 +
-    valueNoise(t * 4.3, cfg.seed + 2) * .28 +
-    valueNoise(t * 11.7, cfg.seed + 4) * .23 +
-    valueNoise(t * 29.1, cfg.seed + 6) * .085 +
-    valueNoise(t * 63.7, cfg.seed + 11) * .028;
-  let elevation = 0;
-  for (const p of cfg.peaks) {
-    const width = t < p.x ? p.width * (p.left ?? 1) : p.width * (p.right ?? 1);
-    const distance = (t - p.x) / width;
-    elevation += p.height * Math.exp(-2.65 * distance * distance);
-  }
-  return cfg.base + cfg.roughness * naturalUndulation - elevation;
+function mountainHeight(t: number, cfg: RidgeConfig, reliefScale = 1) {
+  // An irregular ridge spine with shoulders and saddles, like overlapping
+  // mountain massifs. Cubic interpolation keeps the silhouette continuous;
+  // layered terrain noise gives the skyline geological detail, not triangles.
+  const points = cfg.profile;
+  let i = 0;
+  while (i < points.length - 2 && t > points[i + 1].x) i++;
+  const left = points[i], right = points[i + 1];
+  const width = right.x - left.x;
+  const u = clamp((t - left.x) / width, 0, 1);
+  const previous = points[Math.max(0, i - 1)];
+  const next = points[Math.min(points.length - 1, i + 2)];
+  const m0 = (right.height - previous.height) / (right.x - previous.x) * width * .72;
+  const m1 = (next.height - left.height) / (next.x - left.x) * width * .72;
+  const u2 = u * u, u3 = u2 * u;
+  const spine = (2 * u3 - 3 * u2 + 1) * left.height
+    + (u3 - 2 * u2 + u) * m0
+    + (-2 * u3 + 3 * u2) * right.height
+    + (u3 - u2) * m1;
+  const weatheredEdge =
+    valueNoise(t * 5.1 + .3, cfg.seed) * .40 +
+    valueNoise(t * 14.3, cfg.seed + 2) * .33 +
+    valueNoise(t * 34.7, cfg.seed + 4) * .18 +
+    valueNoise(t * 79.1, cfg.seed + 6) * .09;
+  return cfg.base - (spine + weatheredEdge * cfg.roughness) * reliefScale;
 }
 
 function makeAmbientStars(w: number, h: number): AmbientStar[] {
@@ -244,10 +262,13 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
 }
 
 function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: RidgeConfig) {
+  // Prevent portrait phones from turning a natural mountain into a steep spike.
+  const reliefScale = Math.min(1, w * 1.18 / h);
+  const heightAt = (x: number) => mountainHeight(x / w, config, reliefScale) * h;
   ctx.save();
   ctx.globalAlpha = config.opacity ?? 1;
   ctx.beginPath(); ctx.moveTo(0, h);
-  for (let x = 0; x <= w + 4; x += 3) ctx.lineTo(x, mountainHeight(x / w, config) * h);
+  for (let x = 0; x <= w + 4; x += 3) ctx.lineTo(x, heightAt(x));
   ctx.lineTo(w, h); ctx.closePath();
   const gradient = ctx.createLinearGradient(0, h * .55, 0, h);
   gradient.addColorStop(0, config.top);
@@ -259,8 +280,8 @@ function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: Ridg
   const seed = config.seed;
   for (let i = 0; i < 215; i++) {
     const x = hash1(i * 2, seed + 8) * w;
-    const y = mountainHeight(x / w, config) * h + 6 + hash1(i, seed + 17) * 95;
-    const slope = (mountainHeight((x + 6) / w, config) - mountainHeight((x - 6) / w, config)) * h;
+    const y = heightAt(x) + 6 + hash1(i, seed + 17) * 95;
+    const slope = heightAt(x + 6) - heightAt(x - 6);
     const dx = clamp(slope * .8, -17, 17) + (hash1(i, seed + 23) - .5) * 8;
     const dy = 5 + hash1(i, seed + 31) * 27;
     ctx.strokeStyle = i % 3 === 0 ? "rgba(172,192,218,.058)" : "rgba(33,59,89,.14)";
@@ -274,7 +295,7 @@ function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: Ridg
   ctx.lineWidth = .6;
   ctx.beginPath();
   for (let x = 0; x <= w + 4; x += 3) {
-    const y = mountainHeight(x / w, config) * h;
+    const y = heightAt(x);
     if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.stroke(); ctx.restore();
@@ -295,16 +316,8 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   const water = themePalettes[theme].water;
   lake.addColorStop(0, water[0]); lake.addColorStop(.45, water[1]); lake.addColorStop(1, water[2]);
   ctx.fillStyle = lake; ctx.fillRect(0, waterY, w, h - waterY);
-  const moonX = w * .76;
-  ctx.save(); ctx.globalCompositeOperation = "screen";
-  for (let i = 0; i < 145; i++) {
-    const p = i / 145, y = waterY + p * (h - waterY);
-    const spread = 1 + p * 70;
-    const half = (15 + Math.sin(i * 1.73 + t * 1.3) * spread) * (.4 + p);
-    ctx.fillStyle = `rgba(${p < .4 ? '161,166,233' : '114,126,204'},${(.14 * (1 - p)) * (.3 + .7 * Math.sin(i * 4.33) ** 2)})`;
-    ctx.fillRect(moonX - half, y, half * 2, .45 + Math.sin(i * 1.2) ** 2 * .7);
-  }
-  ctx.restore();
+  // Without a moon, the lake catches dispersed starlight rather than a
+  // concentrated vertical reflection that would suggest an unseen light source.
   for (let i = 0; i < 100; i++) {
     const x = ((i * 73.71) % w), y = waterY + ((i * 17.3) % (h - waterY));
     const len = 4 + (i % 11) * 3;
@@ -458,15 +471,6 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         }
         ctx.closePath(); ctx.fill();
       }
-      ctx.restore();
-
-      // Subtle moon halo and a small, sharp lunar disk.
-      const mx = w * .77, my = h * .245;
-      ctx.save(); ctx.globalCompositeOperation = "screen";
-      halo(ctx, mx, my, Math.min(w, h) * .19, "rgba(183,194,252,ALPHA)", .095);
-      halo(ctx, mx, my, Math.min(w, h) * .066, "rgba(220,230,255,ALPHA)", .12);
-      ctx.fillStyle = "rgba(224,232,255,.76)";
-      ctx.beginPath(); ctx.arc(mx, my, Math.max(2.6, Math.min(w, h) * .0065), 0, TAU); ctx.fill();
       ctx.restore();
 
       landscape(ctx, w, h, t, theme);
