@@ -41,17 +41,44 @@ function valueNoise(x: number, seed: number) {
 type RidgePoint = { x: number; height: number };
 type RidgeConfig = { base: number; roughness: number; seed: number; profile: RidgePoint[]; top: string; bottom: string; opacity?: number };
 const farRidge: RidgeConfig = {
-  // A single broad mountain chain: large massifs separated by long, shallow
-  // saddles. The previous three tiny ridges read as repeated triangular hills.
-  base: .866, roughness: .009, seed: 4.9, top: "#132837", bottom: "#06111d",
+  base: .846, roughness: .017, seed: 4.9, top: "#122534", bottom: "#071420",
   profile: [
-    { x: -.12, height: .055 }, { x: 0, height: .063 },
-    { x: .095, height: .082 }, { x: .22, height: .126 },
-    { x: .32, height: .151 }, { x: .405, height: .119 },
-    { x: .50, height: .071 }, { x: .61, height: .057 },
-    { x: .72, height: .096 }, { x: .815, height: .134 },
-    { x: .90, height: .103 }, { x: 1.01, height: .068 },
-    { x: 1.12, height: .052 },
+    { x: -.12, height: .022 }, { x: .00, height: .037 },
+    { x: .075, height: .050 }, { x: .14, height: .045 },
+    { x: .19, height: .061 }, { x: .245, height: .074 },
+    { x: .28, height: .105 }, { x: .295, height: .109 },
+    { x: .325, height: .096 }, { x: .36, height: .071 },
+    { x: .44, height: .056 }, { x: .49, height: .070 },
+    { x: .555, height: .077 }, { x: .61, height: .058 },
+    { x: .675, height: .063 }, { x: .72, height: .087 },
+    { x: .758, height: .099 }, { x: .795, height: .077 },
+    { x: .85, height: .064 }, { x: .89, height: .075 },
+    { x: .95, height: .051 }, { x: 1.12, height: .039 },
+  ],
+};
+const middleRidge: RidgeConfig = {
+  base: .897, roughness: .011, seed: 12.7, top: "#091724", bottom: "#030b16",
+  profile: [
+    { x: -.12, height: .031 }, { x: .00, height: .060 },
+    { x: .07, height: .070 }, { x: .12, height: .063 },
+    { x: .195, height: .034 }, { x: .23, height: .040 },
+    { x: .29, height: .052 }, { x: .355, height: .081 },
+    { x: .405, height: .090 }, { x: .44, height: .072 },
+    { x: .515, height: .048 }, { x: .57, height: .053 },
+    { x: .63, height: .075 }, { x: .695, height: .096 },
+    { x: .745, height: .073 }, { x: .79, height: .050 },
+    { x: .845, height: .054 }, { x: .90, height: .072 },
+    { x: .98, height: .055 }, { x: 1.12, height: .036 },
+  ],
+};
+const shoreRidge: RidgeConfig = {
+  base: .941, roughness: .004, seed: 23.6, top: "#030d16", bottom: "#01050d",
+  profile: [
+    { x: -.12, height: .018 }, { x: .00, height: .026 },
+    { x: .18, height: .018 }, { x: .31, height: .014 },
+    { x: .47, height: .029 }, { x: .58, height: .022 },
+    { x: .73, height: .015 }, { x: .85, height: .028 },
+    { x: .93, height: .040 }, { x: 1.12, height: .020 },
   ],
 };
 
@@ -145,49 +172,44 @@ function halo(ctx: CanvasRenderingContext2D, x: number, y: number, radius: numbe
   ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
 }
 
+// Each hue gets two cached optical point-spread sprites. At 300–500 stars,
+// redrawing multiple gradients per star on every frame stutters on phones.
+const starSprites = new Map<string, HTMLCanvasElement>();
+function starSprite(hue: number, highlighted: boolean) {
+  const key = `${hue}-${highlighted}`;
+  const cached = starSprites.get(key);
+  if (cached) return cached;
+  const surface = document.createElement("canvas");
+  surface.width = surface.height = 54;
+  const g = surface.getContext("2d")!;
+  const x = 27, y = 27;
+  const radius = highlighted ? 16 : 11;
+  const aura = g.createRadialGradient(x, y, 0, x, y, radius);
+  aura.addColorStop(0, `hsla(${hue},38%,98%,.96)`);
+  aura.addColorStop(.075, `hsla(${hue},40%,90%,.52)`);
+  aura.addColorStop(.28, `hsla(${hue},50%,83%,.105)`);
+  aura.addColorStop(1, `hsla(${hue},50%,80%,0)`);
+  g.fillStyle = aura; g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  if (highlighted) {
+    // Very faint diffraction only for the selected/owned star.
+    g.strokeStyle = `hsla(${hue},35%,94%,.19)`;
+    g.lineWidth = .45;
+    g.beginPath(); g.moveTo(x - 7, y); g.lineTo(x + 7, y);
+    g.moveTo(x, y - 6); g.lineTo(x, y + 6); g.stroke();
+  }
+  g.fillStyle = "rgba(254,254,255,.97)";
+  g.beginPath(); g.arc(x, y, highlighted ? 1.14 : .86, 0, TAU); g.fill();
+  starSprites.set(key, surface);
+  return surface;
+}
+
 function livingStar(ctx: CanvasRenderingContext2D, x: number, y: number, hue: number, time: number, seed: number, owned: boolean, selected: boolean, live: boolean, received: number) {
-  const breath = .75 + Math.sin(time * .78 + seed * 12) * .11 + Math.sin(time * 1.39 + seed * 30) * .085;
-  const energy = (selected ? 1.15 : owned ? 1 : .76) * (1 + Math.min(5, received) * .055);
-  const size = (owned || selected ? 22 : 17) * energy;
-  const aura = ctx.createRadialGradient(x, y, 0, x, y, size * 2.1);
-  aura.addColorStop(0, `hsla(${hue},90%,95%,${.61 * breath})`);
-  aura.addColorStop(.07, `hsla(${hue},94%,82%,${.34 * breath})`);
-  aura.addColorStop(.20, `hsla(${hue},96%,69%,${.105 * breath})`);
-  aura.addColorStop(.48, `hsla(${hue},96%,61%,${.025 * breath})`);
-  aura.addColorStop(1, `hsla(${hue},96%,61%,0)`);
-  ctx.fillStyle = aura;
-  ctx.fillRect(x - size * 2.1, y - size * 2.1, size * 4.2, size * 4.2);
-
-  const spikes = [
-    { x: 1, y: .11, length: 11.3, width: .48, opacity: .45 },
-    { x: -.055, y: 1, length: 8.2, width: .46, opacity: .32 },
-    { x: .72, y: .69, length: 4.9, width: .35, opacity: .15 },
-  ];
-  for (const beam of spikes) {
-    const length = beam.length * energy * (.90 + .15 * Math.sin(time * .61 + seed * 4));
-    const dx = beam.x * length, dy = beam.y * length;
-    const gradient = ctx.createLinearGradient(x - dx, y - dy, x + dx, y + dy);
-    gradient.addColorStop(0, `hsla(${hue},94%,88%,0)`);
-    gradient.addColorStop(.44, `hsla(${hue},94%,88%,${beam.opacity * breath * .32})`);
-    gradient.addColorStop(.5, `hsla(${hue},94%,97%,${beam.opacity * breath})`);
-    gradient.addColorStop(.56, `hsla(${hue},94%,88%,${beam.opacity * breath * .32})`);
-    gradient.addColorStop(1, `hsla(${hue},94%,88%,0)`);
-    ctx.strokeStyle = gradient;
-    ctx.lineWidth = beam.width;
-    ctx.beginPath(); ctx.moveTo(x - dx, y - dy); ctx.lineTo(x + dx, y + dy); ctx.stroke();
-  }
-  ctx.fillStyle = "rgba(251,253,255,.97)";
-  ctx.beginPath(); ctx.arc(x, y, (owned || selected ? 1.45 : 1.12) * breath, 0, TAU); ctx.fill();
-
-  if (live) {
-    // Shared presence is a slow pulse of scattered light, not an enclosing ring.
-    for (let i = 0; i < 4; i++) {
-      const a = time * .21 + seed * 7 + i * 1.618;
-      const r = 9 + (i % 2) * 7 + Math.sin(time * .43 + i) * 1.5;
-      ctx.fillStyle = `hsla(${hue},94%,88%,${.13 + .10 * Math.sin(time + i) ** 2})`;
-      ctx.beginPath(); ctx.arc(x + Math.cos(a) * r, y + Math.sin(a) * r * .66, .35 + i % 2 * .18, 0, TAU); ctx.fill();
-    }
-  }
+  // The point stays absolutely still. Only its luminosity scintillates slowly.
+  const breath = .84 + Math.sin(time * .57 + seed * 12) * .095 + Math.sin(time * 1.19 + seed * 30) * .04;
+  const sprite = starSprite(hue, owned || selected);
+  ctx.globalAlpha = clamp(breath * (selected ? 1 : owned ? .98 : .89) * (1 + Math.min(5, received) * .035) * (live ? 1.06 : 1), 0, 1);
+  ctx.drawImage(sprite, x - 27, y - 27);
+  ctx.globalAlpha = 1;
 }
 
 const themePalettes: Record<SkyTheme, { sky: string[]; haze: string[]; water: string[] }> = {
@@ -229,9 +251,9 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
 }
 
 function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: RidgeConfig) {
-  // On a phone the mountain must keep its apparent vertical size, rather than
-  // being flattened by the portrait aspect ratio into a row of tiny bumps.
-  const reliefScale = w / h < .78 ? .88 : 1;
+  // Return to the older, asymmetric mountain ranges. Their varied saddles
+  // read more naturally than the two large matching domes.
+  const reliefScale = Math.min(1, w * 1.18 / h) * (w / h < .78 ? .76 : 1);
   const heightAt = (x: number) => mountainHeight(x / w, config, reliefScale) * h;
   ctx.save();
   ctx.globalAlpha = config.opacity ?? 1;
@@ -263,7 +285,7 @@ function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: Ridg
 }
 
 function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, theme: SkyTheme) {
-  const waterY = h * (w / h < .78 ? .876 : .855);
+  const waterY = h * (w / h < .78 ? .864 : .835);
   // Faint atmospheric haze just behind the distant mountain peaks.
   const mist = ctx.createLinearGradient(0, h * .68, 0, h * .89);
   mist.addColorStop(0, "rgba(114,137,166,0)");
@@ -271,6 +293,7 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   mist.addColorStop(1, "rgba(29,57,88,0)");
   ctx.fillStyle = mist; ctx.fillRect(0, h * .67, w, h * .24);
   ridge(ctx, w, h, farRidge);
+  ridge(ctx, w, h, middleRidge);
 
   const lake = ctx.createLinearGradient(0, waterY, 0, h);
   const water = themePalettes[theme].water;
@@ -285,17 +308,23 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
     ctx.fillRect(x + Math.sin(t * .45 + i * 3) * 8, y, len, .65);
   }
 
-  // One smooth, low shoreline grounds the luminous tree. No extra rows of
-  // miniature peaks or triangular silhouettes in front of the mountain.
-  ctx.beginPath();
-  ctx.moveTo(0, h * .893);
-  ctx.bezierCurveTo(w * .18, h * .888, w * .32, h * .899, w * .48, h * .891);
-  ctx.bezierCurveTo(w * .65, h * .882, w * .80, h * .894, w, h * .887);
-  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
-  const shore = ctx.createLinearGradient(0, h * .87, 0, h);
-  shore.addColorStop(0, "#04101d");
-  shore.addColorStop(1, "#01050e");
-  ctx.fillStyle = shore; ctx.fill();
+  ridge(ctx, w, h, shoreRidge);
+  const treeRand = rng(88112);
+  for (let i = 0; i < 58; i++) {
+    const x = treeRand() * w;
+    const d = treeRand();
+    const y = h * (.835 + d * .15);
+    const height = (2 + d * 13) * (w < 580 ? .65 : 1);
+    ctx.strokeStyle = `rgba(2,12,23,${.22 + d * .48})`;
+    ctx.lineWidth = .9 + d * 1.2;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - height); ctx.stroke();
+    ctx.fillStyle = `rgba(2,13,25,${.24 + d * .45})`;
+    for (let j = 0; j < 4; j++) {
+      const yy = y - height * (.36 + j * .17);
+      const ww = height * (.39 - j * .07);
+      ctx.beginPath(); ctx.moveTo(x, yy - height * .23); ctx.lineTo(x - ww, yy + height * .20); ctx.lineTo(x + ww, yy + height * .20); ctx.closePath(); ctx.fill();
+    }
+  }
   const bottom = ctx.createLinearGradient(0, h * .91, 0, h);
   bottom.addColorStop(0, "rgba(1,5,14,0)"); bottom.addColorStop(1, "rgba(1,5,14,.9)");
   ctx.fillStyle = bottom; ctx.fillRect(0, h * .91, w, h * .09);
@@ -312,6 +341,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     if (!ctx) return;
     let destroyed = false, frame = 0;
     let backdrop: HTMLCanvasElement | null = null;
+    let terrainLayer: HTMLCanvasElement | null = null;
     let ambientStars: AmbientStar[] = [];
     let w = 0, h = 0, dpr = 1;
     const timeZero = performance.now();
@@ -324,6 +354,10 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     let finalFireballSent = false;
     let lastPaint = 0;
     let drawnSky: Star[] | null = null;
+    let drawnGlows: Glow[] | null = null;
+    let drawnPresence: string[] | null = null;
+    let cachedGlowCounts = new Map<string, number>();
+    let cachedPresence = new Set<string>();
     let cachedLinks: ConstellationLink[] = [];
     let constellationLayer: HTMLCanvasElement | null = null;
 
@@ -361,6 +395,11 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       local.current = { w, h };
       backdrop = createBackdrop(w, h, theme);
+      terrainLayer = document.createElement("canvas");
+      terrainLayer.width = canvas.width;
+      terrainLayer.height = canvas.height;
+      const terrainCtx = terrainLayer.getContext("2d");
+      if (terrainCtx) { terrainCtx.setTransform(dpr, 0, 0, dpr, 0, 0); landscape(terrainCtx, w, h, 0, theme); }
       ambientStars = makeAmbientStars(w, h);
       drawnSky = null;
     }
@@ -369,15 +408,15 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     resize();
 
     function spawnMeteor(t: number, bright = 1) {
-      // A shallow, shared radiant: the reference's blue meteors drift from
-      // upper-right toward lower-left, but never march in perfect parallel.
-      const x = w * (.22 + random() * .90), y = h * (.055 + random() * .43);
-      const velocity = 85 + random() * 77;
-      const slope = .48 + random() * .31;
+      // Real meteors flare briefly, with varying apparent lengths and angles.
+      // A few brighter fireballs linger; most streaks are short and restrained.
+      const x = w * (.23 + random() * .88), y = h * (.06 + random() * .43);
+      const velocity = 125 + random() * 125;
+      const slope = .25 + random() * .67;
       meteors.push({
         x, y, vx: -velocity, vy: velocity * slope,
-        born: t, length: Math.min(w * .47, (82 + random() * 96) * (bright > 1.1 ? 1.18 : 1)),
-        life: 3.15 + random() * 1.15,
+        born: t, length: Math.min(w * .21, (22 + random() * 56) * (bright > 1.1 ? 1.5 : 1)),
+        life: bright > 1.1 ? 1.55 : .68 + random() * .56,
         bright, warmth: random(),
       });
     }
@@ -397,7 +436,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       // pulse in unison or flash like a UI particle effect.
       ctx.save(); ctx.globalCompositeOperation = "screen";
       for (const star of ambientStars) {
-        const breath = clamp(.88 + .085 * Math.sin(t * star.speed + star.phase) + .035 * Math.sin(t * star.speed * 1.7 + star.phase * 1.9), .73, 1.03);
+        const breath = clamp(.88 + .12 * Math.sin(t * star.speed + star.phase) + .048 * Math.sin(t * star.speed * 1.7 + star.phase * 1.9), .68, 1.07);
         const alpha = star.alpha * breath;
         ctx.fillStyle = `rgba(${star.tint},${alpha})`;
         if (star.radius < .72) {
@@ -408,67 +447,71 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       }
       ctx.restore();
 
-      landscape(ctx, w, h, t, theme);
+      if (terrainLayer) ctx.drawImage(terrainLayer, 0, 0, w, h);
 
       drawMemoryTree(ctx, w, h, t, refs.current.stars.length, refs.current.glows.length);
 
       if (refs.current.showerKey > seenShower) {
         seenShower = refs.current.showerKey;
         showerStartedAt = t;
-        showerUntil = t + 22;
+        showerUntil = t + 18;
         nextMeteor = t;
         finalFireballSent = false;
       }
       const isShower = t < showerUntil;
-      if (isShower && !finalFireballSent && t - showerStartedAt > 12.5) {
-        spawnMeteor(t, 1.16);
+      if (isShower && !finalFireballSent && t - showerStartedAt > 10) {
+        spawnMeteor(t, 1.22);
         finalFireballSent = true;
       }
       if (t > nextMeteor) {
-        const progress = isShower ? clamp((t - showerStartedAt) / 22, 0, 1) : 0;
-        const intensity = isShower ? .83 + .17 * Math.sin(Math.PI * progress) : 0;
-        spawnMeteor(t, isShower ? .79 + random() * .25 : .58);
-        nextMeteor = t + (isShower ? (.45 + random() * .33) / intensity : 13 + random() * 17);
+        const progress = isShower ? clamp((t - showerStartedAt) / 18, 0, 1) : 0;
+        const intensity = isShower ? .88 + .12 * Math.sin(Math.PI * progress) : 1;
+        if (meteors.length < 3) spawnMeteor(t, isShower ? .73 + random() * .3 : .54);
+        nextMeteor = t + (isShower ? (1.15 + random() * 1.10) / intensity : 15 + random() * 20);
       }
       for (let i = meteors.length - 1; i >= 0; i--) {
         const m = meteors[i];
         const age = t - m.born;
         if (age > m.life) { meteors.splice(i, 1); continue; }
         const px = m.x + age * m.vx, py = m.y + age * m.vy;
-        const fadeIn = clamp(age / .35, 0, 1);
-        const fadeOut = clamp((m.life - age) / .92, 0, 1);
+        const fadeIn = clamp(age / .12, 0, 1);
+        const fadeOut = clamp((m.life - age) / (m.life * .57), 0, 1);
         const alpha = Math.pow(fadeIn, .7) * Math.pow(fadeOut, .8) * m.bright;
-        const len = m.length * clamp(age / .62, 0, 1);
+        const len = m.length * clamp(age / .24, 0, 1);
         const dist = Math.hypot(m.vx, m.vy);
         const tailX = px - (m.vx / dist) * len, tailY = py - (m.vy / dist) * len;
         ctx.save(); ctx.globalCompositeOperation = "screen";
         ctx.lineCap = "round";
         const warm = m.warmth > .95;
-        const coreColor = warm ? "255,237,216" : "232,251,255";
-        const tailColor = warm ? "245,194,159" : "72,170,241";
+        const coreColor = warm ? "255,237,216" : "242,250,255";
+        const tailColor = warm ? "245,211,185" : "160,207,238";
         for (const layer of [
-          { width: 6.3, power: .11 },
-          { width: 1.25, power: .83 },
+          { width: 3.0, power: .09 },
+          { width: .72, power: .82 },
         ]) {
           const stroke = ctx.createLinearGradient(px, py, tailX, tailY);
           stroke.addColorStop(0, `rgba(${coreColor},${clamp(alpha * layer.power, 0, 1)})`);
-          stroke.addColorStop(.18, `rgba(${tailColor},${clamp(alpha * layer.power * .70, 0, 1)})`);
-          stroke.addColorStop(.62, `rgba(${tailColor},${clamp(alpha * layer.power * .13, 0, 1)})`);
+          stroke.addColorStop(.18, `rgba(${tailColor},${clamp(alpha * layer.power * .58, 0, 1)})`);
+          stroke.addColorStop(.62, `rgba(${tailColor},${clamp(alpha * layer.power * .10, 0, 1)})`);
           stroke.addColorStop(1, `rgba(${tailColor},0)`);
           ctx.strokeStyle = stroke;
           ctx.lineWidth = layer.width * (m.bright > 1.1 ? 1.13 : 1);
           ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(tailX, tailY); ctx.stroke();
         }
-        halo(ctx, px, py, 9 + m.bright * 8, warm ? "rgba(255,218,188,ALPHA)" : "rgba(148,218,255,ALPHA)", clamp(alpha * .37, 0, .58));
+        if (m.bright > 1.1) halo(ctx, px, py, 8, warm ? "rgba(255,218,188,ALPHA)" : "rgba(205,228,249,ALPHA)", clamp(alpha * .24, 0, .36));
         ctx.fillStyle = `rgba(${coreColor},${clamp(alpha * .94, 0, 1)})`;
-        ctx.beginPath(); ctx.arc(px, py, m.bright > 1.1 ? 1.47 : 1.07, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(px, py, m.bright > 1.1 ? 1.2 : .73, 0, TAU); ctx.fill();
         ctx.restore();
       }
 
       const { stars: people, glows: lights, liveStarIds: live, myStarId: myId, selectedId: selected } = refs.current;
       if (drawnSky !== people) prepareConstellations(people);
-      const glowCounts = new Map<string, number>();
-      for (const g of lights) glowCounts.set(g.toStarId, (glowCounts.get(g.toStarId) ?? 0) + 1);
+      if (drawnGlows !== lights) {
+        drawnGlows = lights;
+        cachedGlowCounts = new Map();
+        for (const g of lights) cachedGlowCounts.set(g.toStarId, (cachedGlowCounts.get(g.toStarId) ?? 0) + 1);
+      }
+      if (drawnPresence !== live) { drawnPresence = live; cachedPresence = new Set(live); }
       ctx.save(); ctx.globalCompositeOperation = "screen";
       if (refs.current.showConstellations) {
         if (constellationLayer) ctx.drawImage(constellationLayer, 0, 0, w, h);
@@ -494,8 +537,8 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
 
       for (const s of people) {
         const x = s.x * w, y = s.y * h;
-        const mine = s.id === myId, picked = s.id === selected, isLive = live.includes(s.id);
-        livingStar(ctx, x, y, s.hue, t, s.x + s.y * 2.4, mine, picked, isLive, glowCounts.get(s.id) ?? 0);
+        const mine = s.id === myId, picked = s.id === selected, isLive = cachedPresence.has(s.id);
+        livingStar(ctx, x, y, s.hue, t, s.x + s.y * 2.4, mine, picked, isLive, cachedGlowCounts.get(s.id) ?? 0);
         if (mine || picked) {
           ctx.globalCompositeOperation = "source-over";
           ctx.font = `${mine ? '500' : '400'} 11px -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif`;

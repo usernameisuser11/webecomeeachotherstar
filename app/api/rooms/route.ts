@@ -1,7 +1,7 @@
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, gte } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { roomGlows, roomPresence, rooms, roomStars } from "../../../db/schema";
-import { fail, hashSecret, jsonBody, noCache, validRoomId } from "../../../lib/room-utils";
+import { reports, roomGlows, roomPresence, rooms, roomStars } from "../../../db/schema";
+import { fail, hashSecret, jsonBody, MAX_REPORTS_PER_DAY, noCache, publicName, validReportReason, validRoomId } from "../../../lib/room-utils";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -28,8 +28,8 @@ export async function POST(request: Request) {
       return Response.json({ rooms: mine }, { headers: noCache });
     }
     if (body.action === "create") {
-      const name = typeof body.name === "string" ? body.name.trim().replace(/[<>\r\n\t]/g, "") : "";
-      if (!name || [...name].length > 20) return fail("방 이름은 1~20글자로 적어 주세요.");
+      const name = publicName(body.name, 20);
+      if (!name) return fail("방 이름을 확인해 주세요. 욕설·연락처 없이 1~20글자로 적어 주세요.");
       if (body.visibility !== "public" && body.visibility !== "private") return fail("공개 여부를 선택해 주세요.");
       if (!(["forest", "violet", "ocean", "dawn"] as unknown[]).includes(body.theme)) return fail("밤하늘 배경을 골라 주세요.");
       const inviteHash = body.visibility === "private" ? await hashSecret(body.inviteKey) : null;
@@ -45,12 +45,33 @@ export async function POST(request: Request) {
       const room = await db.select({ id: rooms.id }).from(rooms).where(and(eq(rooms.id, body.roomId), eq(rooms.ownerHash, ownerHash))).limit(1);
       if (!room.length) return fail("이 방을 삭제할 수 없습니다.", 403);
       await db.batch([
+        db.delete(reports).where(eq(reports.roomId, body.roomId)),
         db.delete(roomGlows).where(eq(roomGlows.roomId, body.roomId)),
         db.delete(roomPresence).where(eq(roomPresence.roomId, body.roomId)),
         db.delete(roomStars).where(eq(roomStars.roomId, body.roomId)),
-        db.delete(rooms).where(eq(rooms.id, body.roomId)),
+        db.delete(rooms).where(and(eq(rooms.id, body.roomId), eq(rooms.ownerHash, ownerHash))),
       ]);
       return Response.json({ ok: true }, { headers: noCache });
+    }
+    if (body.action === "report-room") {
+      if (!validRoomId(body.roomId) || !validReportReason(body.reason)) return fail("신고할 방과 사유를 확인해 주세요.");
+      const [target] = await db.select({ id: rooms.id, ownerHash: rooms.ownerHash, visibility: rooms.visibility }).from(rooms).where(eq(rooms.id, body.roomId)).limit(1);
+      if (!target || target.visibility !== "public" || target.ownerHash === ownerHash) return fail("신고할 수 없는 방입니다.", 403);
+      const now = Date.now();
+      const [{ total }] = await db.select({ total: count() }).from(reports).where(and(eq(reports.reporterHash, ownerHash), gte(reports.createdAt, now - 86400000)));
+      if (total >= MAX_REPORTS_PER_DAY) return fail("신고는 하루 최대 6회까지 가능합니다.", 429);
+      await db.insert(reports).values({ id: crypto.randomUUID(), targetType: "room", targetId: target.id, roomId: target.id, reporterHash: ownerHash, reason: body.reason, createdAt: now }).onConflictDoNothing();
+      return Response.json({ ok: true }, { headers: noCache });
+    }
+    if (body.action === "reports") {
+      if (!validRoomId(body.roomId)) return fail("방 주소를 확인해 주세요.");
+      const [owned] = await db.select({ id: rooms.id }).from(rooms).where(and(eq(rooms.id, body.roomId), eq(rooms.ownerHash, ownerHash))).limit(1);
+      if (!owned) return fail("방장만 신고 내역을 확인할 수 있습니다.", 403);
+      const incoming = await db.select({ starId: reports.targetId, name: roomStars.name, reason: reports.reason, createdAt: reports.createdAt })
+        .from(reports).innerJoin(roomStars, eq(reports.targetId, roomStars.id))
+        .where(and(eq(reports.roomId, body.roomId), eq(reports.targetType, "star")))
+        .orderBy(desc(reports.createdAt)).limit(100);
+      return Response.json({ reports: incoming }, { headers: noCache });
     }
     return fail("알 수 없는 요청입니다.");
   } catch (error) { console.error("rooms POST", error); return fail("잠시 방을 준비하지 못했습니다. 다시 시도해 주세요.", 503); }

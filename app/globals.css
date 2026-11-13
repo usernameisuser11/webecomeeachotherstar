@@ -73,6 +73,13 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 .star-card h2 { font-size:26px; font-weight:400; letter-spacing:-.055em; margin:0 0 13px; }
 .star-card p { line-height:1.8; font-size:12px; color:#b9c9d9; margin:0; }
 .glow-button { display:flex; align-items:center; justify-content:center; gap:10px; background:rgba(151,207,204,.15); color:#d2eee7; border:1px solid rgba(173,228,226,.48); border-radius:8px; margin-top:22px; padding:12px 14px; width:100%; font-size:12px; }
+.star-card-moderation { display:flex; gap:14px; margin-top:14px; flex-wrap:wrap; }
+.quiet-report { display:inline-flex; align-items:center; gap:5px; padding:6px 0; color:#91aabd; background:none; border:0; font-size:11px; }
+.quiet-report:hover { color:#d1e8e9; }
+.star-report-form { display:grid; gap:9px; border-top:1px solid rgba(198,220,231,.17); padding-top:12px; margin-top:8px; }
+.star-report-form label { color:#bdd1dc; font-size:11px; }
+.star-report-form select { width:100%; padding:9px 10px; background:#152b3b; color:#eef5f7; border:1px solid #5f7b8e; border-radius:5px; font-size:12px; }
+.star-report-form button { padding:9px; background:rgba(151,207,204,.13); color:#d1ebea; border:1px solid rgba(168,209,208,.32); border-radius:5px; font-size:11px; }
 .private-wish { margin-top:18px; padding-top:15px; border-top:1px solid rgba(213,237,240,.16); }
 .private-wish span { color:#a4d5d2; font-size:10px; letter-spacing:.06em; }
 .private-wish p { margin-top:8px; white-space:pre-wrap; }
@@ -139,6 +146,20 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 .room-list-item .room-row { padding-right:42px; }
 .room-delete { position:absolute; top:17px; right:0; border:0; background:none; color:#8e9fae; font-size:10px; padding:8px 4px; }
 .room-delete:hover { color:#ecc6c6; }
+.room-report-inline { display:flex; align-items:center; gap:7px; padding:0 5px 13px 42px; flex-wrap:wrap; }
+.room-report-inline label { font-size:10px; color:#a8bdc8; }
+.room-report-inline select { min-width:110px; padding:7px; border:1px solid #5e788b; border-radius:4px; background:#172a3a; color:#eff4f4; font-size:11px; }
+.room-report-inline button { padding:7px 10px; border:1px solid rgba(171,211,213,.5); border-radius:4px; color:#e0eded; background:rgba(80,127,136,.2); font-size:10px; }
+.room-list-item:has(.room-owner-actions) .room-row { padding-right:99px; }
+.room-owner-actions { position:absolute; top:17px; right:0; display:flex; gap:7px; }
+.room-owner-actions button { display:flex; gap:3px; align-items:center; border:0; background:none; color:#9db6bd; font-size:10px; padding:8px 3px; }
+.room-owner-actions button:hover { color:#e5f6f5; }
+.moderation-list { max-height:42dvh; overflow:auto; margin-top:12px; }
+.moderation-row { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:14px 1px; border-top:1px solid rgba(198,220,231,.16); }
+.moderation-row span { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.moderation-row b { font-size:13px; color:#dfe9ec; font-weight:500; overflow:hidden; text-overflow:ellipsis; }
+.moderation-row small { font-size:10px; color:#9cafc0; }
+.moderation-row button { flex:none; padding:7px 9px; font-size:11px; border:1px solid rgba(229,188,188,.3); color:#f0d2d2; background:none; border-radius:5px; }
 .sheet-action { position:relative; width:100%; min-height:47px; margin-top:24px; display:flex; justify-content:center; align-items:center; gap:10px; border:1px solid rgba(171,211,213,.52); border-radius:3px; background:rgba(80,127,136,.2); color:#e0eeec; font-size:13px; text-align:center; }
 .sheet-action span { position:absolute; right:15px; margin:0; }
 .sheet-small-note { margin:15px 0 2px; color:#90a9b6; font-size:10px; line-height:1.75; }

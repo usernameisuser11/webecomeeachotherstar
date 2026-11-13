@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Camera, Check, CircleHelp, Heart, Link2, Plus, Sparkles, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowUpRight, Camera, Check, CircleHelp, Flag, Heart, Link2, Plus, ShieldCheck, Sparkles, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import NightSky, { type Glow, type Star } from "../components/NightSky";
 import StellarParticles from "../components/StellarParticles";
 
@@ -9,6 +9,13 @@ type SkyState = { stars: Star[]; glows: Glow[]; liveStarIds: string[] };
 type SkyTheme = "forest" | "violet" | "ocean" | "dawn";
 type Room = { id: string; name: string; visibility: "public" | "private"; theme: SkyTheme; createdAt: number };
 type ActiveRoom = Room & { inviteKey?: string };
+type ModerationItem = { starId: string; name: string; reason: string; createdAt: number };
+const reportReasons = [
+  { value: "abuse", label: "욕설·괴롭힘" },
+  { value: "spam", label: "광고·도배" },
+  { value: "privacy", label: "개인정보 노출" },
+  { value: "other", label: "기타" },
+];
 const themes: { id: SkyTheme; label: string; note: string }[] = [
   { id: "forest", label: "별이 머무는 숲", note: "깊고 고요한 밤" },
   { id: "violet", label: "보랏빛 성운", note: "은은한 자줏빛" },
@@ -40,6 +47,7 @@ const privateWish = (roomId?: string) => { try { return localStorage.getItem(sto
 
 export default function Home() {
   const [sky, setSky] = useState<SkyState>({ stars: [], glows: [], liveStarIds: [] });
+  const [skyCapacity, setSkyCapacity] = useState(500);
   const [token, setToken] = useState("");
   const [myStarId, setMyStarId] = useState<string | null>(null);
   const [intro, setIntro] = useState(true);
@@ -57,7 +65,13 @@ export default function Home() {
   const [soundOn, setSoundOn] = useState(false);
   const [showConstellations, setShowConstellations] = useState(true);
   const [activeRoom, setActiveRoom] = useState<ActiveRoom | null>(null);
-  const [roomPanel, setRoomPanel] = useState<"directory" | "create" | null>(null);
+  const [roomPanel, setRoomPanel] = useState<"directory" | "create" | "moderation" | null>(null);
+  const [moderationRoom, setModerationRoom] = useState<Room | null>(null);
+  const [moderationItems, setModerationItems] = useState<ModerationItem[]>([]);
+  const [reportingId, setReportingId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState("abuse");
+  const [reportingRoomId, setReportingRoomId] = useState<string | null>(null);
+  const [roomReportReason, setRoomReportReason] = useState("abuse");
   const [roomName, setRoomName] = useState("");
   const [roomVisibility, setRoomVisibility] = useState<"public" | "private">("public");
   const [roomTheme, setRoomTheme] = useState<SkyTheme>("forest");
@@ -90,6 +104,7 @@ export default function Home() {
     setActiveRoom(room);
     setSky({ stars: [], glows: [], liveStarIds: [] });
     setSelectedId(null); setPlacing(false); setShowCreate(false); setRoomPanel(null);
+    setReportingId(null);
     setIntro(false);
     try {
       const starId = localStorage.getItem(storageKey("our-sky-star-id-v1", room?.id)) || null;
@@ -127,6 +142,8 @@ export default function Home() {
     } catch (error) { setToast(error instanceof Error ? error.message : "방을 불러오지 못했습니다."); }
   }, []);
 
+  useEffect(() => { if (token) loadRooms(); }, [token, loadRooms]);
+
   const openRooms = () => { setIntro(false); setRoomPanel("directory"); loadRooms(); };
 
   const enterRoom = async (room: Room) => {
@@ -147,6 +164,7 @@ export default function Home() {
       if (!response.ok) throw Error(data.error || "방을 만들지 못했습니다.");
       if (inviteKey) localStorage.setItem(`our-sky-invite:${data.room.id}`, inviteKey);
       switchRoom({ ...data.room, inviteKey });
+      setMyRooms(previous => [data.room, ...previous.filter(room => room.id !== data.room.id)]);
       setRoomName("");
       setToast(roomVisibility === "private" ? "비공개 하늘이 만들어졌습니다. 초대 링크를 공유해 주세요." : "새로운 하늘이 열렸습니다.");
     } catch (error) { setToast(error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요."); }
@@ -167,6 +185,42 @@ export default function Home() {
     finally { setBusy(false); }
   };
 
+  const openModeration = async (room: Room) => {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reports", token: tokenRef.current, roomId: room.id }) });
+      const data: { reports?: ModerationItem[]; error?: string } = await response.json();
+      if (!response.ok) throw Error(data.error || "신고 내역을 불러오지 못했습니다.");
+      setModerationRoom(room); setModerationItems(data.reports || []); setRoomPanel("moderation");
+    } catch (error) { setToast(error instanceof Error ? error.message : "신고 내역을 불러오지 못했습니다."); }
+    finally { setBusy(false); }
+  };
+
+  const removeReportedStar = async (room: Room, item: ModerationItem) => {
+    if (!window.confirm(`신고된 별 ‘${item.name}’을(를) 삭제하시겠습니까? 되돌릴 수 없습니다.`)) return;
+    setBusy(true);
+    try {
+      let inviteKey = "";
+      try { inviteKey = localStorage.getItem(`our-sky-invite:${room.id}`) || ""; } catch {}
+      await api({ action: "delete-star", targetId: item.starId, token: tokenRef.current }, { ...room, inviteKey });
+      setModerationItems(prev => prev.filter(entry => entry.starId !== item.starId));
+      if (roomRef.current?.id === room.id) await refresh();
+      setToast("신고된 별을 삭제했습니다.");
+    } catch (error) { setToast(error instanceof Error ? error.message : "삭제하지 못했습니다."); }
+    finally { setBusy(false); }
+  };
+
+  const reportRoom = async (room: Room) => {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "report-room", token: tokenRef.current, roomId: room.id, reason: roomReportReason }) });
+      const data: { error?: string } = await response.json(); if (!response.ok) throw Error(data.error || "신고하지 못했습니다.");
+      setReportingRoomId(null);
+      setToast("신고가 접수되었습니다. 확인 후 필요한 조치를 진행하겠습니다.");
+    } catch (error) { setToast(error instanceof Error ? error.message : "신고하지 못했습니다."); }
+    finally { setBusy(false); }
+  };
+
   const copyRoomLink = async () => {
     if (!activeRoom) return;
     const url = new URL(window.location.href);
@@ -182,7 +236,8 @@ export default function Home() {
       const data = await api(undefined, requestedRoom);
       if (requestedRoom?.id !== roomRef.current?.id) return;
       setSky({ stars: data.stars || [], glows: data.glows || [], liveStarIds: data.liveStarIds || [] });
-      if (myStarRef.current && Array.isArray(data.stars) && data.stars.length < 500 && !data.stars.some((s: Star) => s.id === myStarRef.current)) {
+      setSkyCapacity(data.capacity || 500);
+      if (myStarRef.current && Array.isArray(data.stars) && !data.stars.some((s: Star) => s.id === myStarRef.current)) {
         myStarRef.current = null;
         setMyStarId(null);
         try { localStorage.removeItem(storageKey("our-sky-star-id-v1", requestedRoom?.id)); } catch {}
@@ -214,6 +269,7 @@ export default function Home() {
   const myStar = sky.stars.find(s => s.id === myStarId);
   const selected = sky.stars.find(s => s.id === selectedId);
   const liveOther = sky.liveStarIds.some(id => id !== myStarId);
+  const ownsCurrentRoom = !!activeRoom && myRooms.some(room => room.id === activeRoom.id);
 
   const startCreate = () => {
     setIntro(false);
@@ -253,6 +309,33 @@ export default function Home() {
       setToast("작은 빛을 보냈습니다. 친구가 다시 방문하면 그 빛을 발견할 거예요.");
       refresh();
     } catch (error) { setToast(error instanceof Error ? error.message : "빛을 보내지 못했습니다."); }
+    finally { setBusy(false); }
+  };
+
+  const sendReport = async () => {
+    if (!selected || busy || !tokenRef.current) return;
+    setBusy(true);
+    try {
+      await api({ action: "report-star", token: tokenRef.current, targetId: selected.id, reason: reportReason }, roomRef.current);
+      setReportingId(null); setToast("신고가 접수되었습니다. 확인 후 필요한 조치를 진행하겠습니다.");
+    } catch (error) { setToast(error instanceof Error ? error.message : "신고하지 못했습니다."); }
+    finally { setBusy(false); }
+  };
+
+  const deleteStar = async () => {
+    if (!selected || busy) return;
+    const mine = selected.id === myStarId;
+    if (!window.confirm(mine ? "내 별을 삭제하시겠습니까? 받은 빛도 함께 삭제되며 되돌릴 수 없습니다." : "방장 권한으로 이 별을 삭제하시겠습니까? 받은 빛도 함께 삭제됩니다.")) return;
+    setBusy(true);
+    try {
+      await api({ action: "delete-star", token: tokenRef.current, targetId: selected.id }, roomRef.current);
+      if (mine) {
+        myStarRef.current = null; setMyStarId(null);
+        try { localStorage.removeItem(storageKey("our-sky-star-id-v1", roomRef.current?.id)); localStorage.removeItem(storageKey("our-sky-star-name-v1", roomRef.current?.id)); localStorage.removeItem(storageKey("our-sky-private-wish-v1", roomRef.current?.id)); } catch {}
+      }
+      setSelectedId(null); setReportingId(null);
+      await refresh(); setToast("별이 삭제되었습니다.");
+    } catch (error) { setToast(error instanceof Error ? error.message : "별을 삭제하지 못했습니다."); }
     finally { setBusy(false); }
   };
 
@@ -347,6 +430,15 @@ export default function Home() {
       <div className="star-card-label">{selected.id === myStarId ? "MY LITTLE STAR" : "A STAR IN OUR SKY"}</div>
       <h2>{selected.name}</h2>
       {selected.id === myStarId ? <><p>이 하늘에 직접 남기신 별입니다.</p>{privateWish(activeRoom?.id) && <div className="private-wish"><span>나에게만 보이는 소원</span><p>{privateWish(activeRoom?.id)}</p></div>}</> : <><p>서로 다른 곳에서 같은 밤을 바라보고 있는 누군가의 별입니다.</p><button className="glow-button" disabled={busy} onClick={sendGlow}><Heart size={15} /> 작은 빛 보내기 <ArrowUpRight size={14} /></button></>}
+      <div className="star-card-moderation">
+        {selected.id !== myStarId && <button className="quiet-report" onClick={() => setReportingId(current => current === selected.id ? null : selected.id)}><Flag size={13} /> 신고하기</button>}
+        {(selected.id === myStarId || ownsCurrentRoom) && <button className="quiet-report" disabled={busy} onClick={deleteStar}><Trash2 size={13} /> {selected.id === myStarId ? "내 별 삭제" : "방장 권한으로 삭제"}</button>}
+      </div>
+      {reportingId === selected.id && <div className="star-report-form">
+        <label htmlFor="report-reason">신고 사유</label>
+        <select id="report-reason" value={reportReason} onChange={e => setReportReason(e.target.value)}>{reportReasons.map(reason => <option value={reason.value} key={reason.value}>{reason.label}</option>)}</select>
+        <button onClick={sendReport} disabled={busy}>신고 접수하기</button>
+      </div>}
     </aside>}
 
     {!intro && !placing && sky.stars.length > 0 && <div className="star-index" aria-label="친구들의 별 목록">
@@ -369,13 +461,18 @@ export default function Home() {
             {myRooms.length > 0 && <div className="room-list-heading">내가 만든 하늘 <span>{myRooms.length} / 3</span></div>}
             {myRooms.map(room => <div className="room-list-item" key={room.id}>
               <button className={activeRoom?.id === room.id ? "room-row chosen" : "room-row"} onClick={() => enterRoom(room)}><span className="room-figure">{room.visibility === "private" ? "◌" : "✧"}</span><span className="room-row-text"><b>{room.name}</b><small>{room.visibility === "private" ? "초대받은 분만 입장할 수 있습니다" : "누구나 입장할 수 있습니다"}</small></span><span className="room-row-end">↗</span></button>
-              <button className="room-delete" onClick={() => deleteRoom(room)} disabled={busy} aria-label={`${room.name} 방 삭제`}>지우기</button>
+              <div className="room-owner-actions"><button onClick={() => openModeration(room)} disabled={busy} aria-label={`${room.name} 신고 관리`}><ShieldCheck size={13} /> 관리</button><button onClick={() => deleteRoom(room)} disabled={busy} aria-label={`${room.name} 방 삭제`}>삭제</button></div>
             </div>)}
             {publicRooms.filter(room => !myRooms.some(mine => mine.id === room.id)).length > 0 && <div className="room-list-heading">열려 있는 하늘</div>}
-            {publicRooms.filter(room => !myRooms.some(mine => mine.id === room.id)).map(room => <button className={activeRoom?.id === room.id ? "room-row chosen" : "room-row"} key={room.id} onClick={() => enterRoom(room)}><span className="room-figure">✧</span><span className="room-row-text"><b>{room.name}</b><small>누구나 입장할 수 있습니다</small></span><span className="room-row-end">↗</span></button>)}
+            {publicRooms.filter(room => !myRooms.some(mine => mine.id === room.id)).map(room => <div className="room-list-item" key={room.id}><button className={activeRoom?.id === room.id ? "room-row chosen" : "room-row"} onClick={() => enterRoom(room)}><span className="room-figure">✧</span><span className="room-row-text"><b>{room.name}</b><small>누구나 입장할 수 있습니다</small></span><span className="room-row-end">↗</span></button><button className="room-delete" onClick={() => setReportingRoomId(current => current === room.id ? null : room.id)} disabled={busy} aria-label={`${room.name} 방 신고`}>신고</button>{reportingRoomId === room.id && <div className="room-report-inline"><label htmlFor="room-report-reason">신고 사유</label><select id="room-report-reason" value={roomReportReason} onChange={e => setRoomReportReason(e.target.value)}>{reportReasons.map(reason => <option key={reason.value} value={reason.value}>{reason.label}</option>)}</select><button disabled={busy} onClick={() => reportRoom(room)}>접수</button></div>}</div>)}
           </div>
           <button className="sheet-action" onClick={() => { setRoomName(""); setRoomPanel("create"); }}><Plus size={16} strokeWidth={1.5} /> 새로운 하늘 만들기 <span>↗</span></button>
           <p className="sheet-small-note">회원가입 없이 한 기기에서 최대 세 개의 방을 만들 수 있습니다.</p>
+        </> : roomPanel === "moderation" ? <>
+          <button className="sheet-back" onClick={() => { setRoomPanel("directory"); loadRooms(); }}>← 돌아가기</button>
+          <h2>방의 별 관리</h2>
+          <p className="sheet-description">{moderationRoom?.name}에 접수된 신고입니다. 신고가 곧 위반을 뜻하지는 않습니다. 이름을 확인하고 필요한 경우에만 삭제해 주세요.</p>
+          {moderationItems.length === 0 ? <p className="sheet-small-note">현재 접수된 별 신고가 없습니다.</p> : <div className="moderation-list">{moderationItems.map((item, index) => <div className="moderation-row" key={`${item.starId}-${index}`}><span><b>{item.name}</b><small>{reportReasons.find(reason => reason.value === item.reason)?.label || "기타"} · {new Date(item.createdAt).toLocaleDateString("ko-KR")}</small></span><button disabled={busy || !moderationRoom} onClick={() => moderationRoom && removeReportedStar(moderationRoom, item)}>별 삭제</button></div>)}</div>}
         </> : <>
           <button className="sheet-back" onClick={() => { setRoomPanel("directory"); loadRooms(); }}>← 돌아가기</button>
           <h2>우리만의<br />작은 하늘.</h2>
@@ -407,7 +504,7 @@ export default function Home() {
         <div className="color-list">{colors.map(c => <button key={c.hue} title={c.label} aria-label={c.label} aria-pressed={hue === c.hue} className={hue === c.hue ? "selected" : ""} onClick={() => setHue(c.hue)}><span style={{ background: c.hex, boxShadow: `0 0 18px ${c.hex}77` }} />{hue === c.hue && <Check size={11} />}</button>)}</div>
         <label className="field-label" htmlFor="star-wish">2027년의 작은 소원 <small>선택 · 나에게만 보입니다</small></label>
         <textarea id="star-wish" value={wish} onChange={e => setWish(e.target.value.slice(0,160))} maxLength={160} placeholder="말하지 못했던 바람도 괜찮습니다..." rows={3} />
-        <p className="privacy-note">소원은 이 기기에만 저장되며 서버나 다른 친구에게 전송되지 않습니다. 기기 데이터를 삭제하면 함께 사라집니다.</p>
+        <p className="privacy-note">소원은 이 기기에만 저장되며 서버나 다른 친구에게 전송되지 않습니다. 기기 데이터를 삭제하면 함께 사라집니다. 이 하늘에는 별을 최대 {skyCapacity}개까지 남길 수 있습니다.</p>
         <button className="dialog-main" onClick={beginPlacing}>밤하늘에서 자리 정하기 <ArrowUpRight size={17} /></button>
       </section>
     </div>}
@@ -420,6 +517,7 @@ export default function Home() {
         <div className="guide-row"><span>02</span><p>별들은 서로의 곁에서 별자리가 되고, 작은 빛을 주고받을 수 있습니다.</p></div>
         <div className="guide-row"><span>03</span><p>같은 시간에 바라보는 별은 조금 더 밝게 빛납니다. 채팅하지 않아도 괜찮습니다.</p></div>
         <div className="guide-row"><span>04</span><p>소원은 본인 기기에만 저장됩니다. 별 이름은 모두에게 보입니다.</p></div>
+        <div className="guide-row"><span>05</span><p>다른 분의 별에 욕설·괴롭힘·광고가 있다면 별을 선택해 신고해 주세요. 신고 내용은 공개되지 않으며, 방장은 자신의 방에서 신고 내역을 확인할 수 있습니다.</p></div>
         <p className="guide-outro">모두의 마음이 같은 속도로 움직일 필요는 없습니다.<br />이곳에서는 그저 함께 빛나 주세요.</p>
         <button className="dialog-main" onClick={() => setShowGuide(false)}>밤하늘로 돌아가기 <ArrowUpRight size={17} /></button>
       </section>

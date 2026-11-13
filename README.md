@@ -11,7 +11,28 @@
 - **빌드:** `npm run build`.
 - **프로젝트의 방향과 현재 한계:** [PROJECT_VISION.md](PROJECT_VISION.md).
 
-**주의:** 현재 배포된 서비스는 소수 인원 검토 단계이며, 공개 전에 삭제·신고·관리 기능과 개인정보 보호 흐름을 보완해야 합니다. 비공개 방의 초대 링크는 신원 인증이 아닙니다. 서버에는 별 이름과 위치·색상 및 빛의 기록이 저장됩니다. 비공개 소원의 원문은 방문자의 브라우저에만 보관됩니다.
+**주의:** 현재 배포된 서비스는 소수 인원 검토 단계입니다. 비공개 방의 초대 링크는 신원 인증이 아닙니다. 서버에는 별 이름과 위치·색상 및 빛의 기록이 저장됩니다. 소원의 원문은 방문자의 브라우저에만 보관됩니다.
+
+### 참여·삭제·신고 정책
+
+- **별 정원:** 기본 또래상담 하늘 **500개**, 별도로 만든 각 하늘 **300개**. 브라우저 기기 토큰 하나당 **각 하늘에 별 하나**를 남길 수 있습니다. 정원은 DB 저장 시점에 원자적으로 적용됩니다.
+- **방 정원과 권한:** 브라우저 토큰 하나당 방 **최대 3개**. 방 삭제는 **생성 당시의 소유자 토큰**이 서버에서 일치할 때만 가능합니다. 방을 삭제하면 해당 방의 별·빛·접속 정보·신고가 함께 삭제되고 되돌릴 수 없습니다.
+- **별 삭제:** 자신의 별은 본인이 삭제할 수 있습니다. 별도 방의 방장은 방 안의 부적절한 별도 삭제할 수 있습니다. 삭제된 별에 연결된 빛과 신고도 함께 삭제됩니다.
+- **신고:** 다른 사람의 별이나 공개 방을 욕설·괴롭힘, 광고·도배, 개인정보, 기타 사유로 신고할 수 있습니다. 동일한 대상을 중복 신고할 수 없고, **하나의 기기 토큰당 24시간 최대 6회**로 제한됩니다. 신고만으로 자동 삭제되지 않습니다.
+- **관리:** 방장은 `방 목록 → 관리`에서 자신의 방에 접수된 별 신고를 확인하여 필요한 경우 삭제할 수 있습니다. 신고자의 토큰·신원은 화면에 공개되지 않습니다. 기본 또래상담 하늘의 신고와 *공개 방 자체에 대한 신고*는 현재 별도 관리자 화면이 없으므로 운영자가 Cloudflare D1에서 확인해야 합니다.
+- **익명성의 한계:** 회원가입 없이 로컬 기기에 저장된 랜덤 토큰으로 소유자를 구분하므로, 브라우저 데이터를 지우거나 기기를 바꾸면 자신의 방·별을 관리할 권한을 잃을 수 있습니다. 별도 기기를 통한 중복 참여나 악성 이용을 완전히 방지하는 실명 인증은 없습니다. 운영 규모가 커지면 별도 인증/Turnstile, 복구 수단, 운영자 검토 화면을 추가해야 합니다.
+
+운영자용 신고 조회 예시(읽기 전용):
+
+```sql
+SELECT r.target_type, r.target_id, r.reason, r.room_id, r.created_at,
+       COALESCE(s.name, rs.name, rm.name) AS reported_name
+FROM reports r
+LEFT JOIN stars s ON r.target_type = 'star' AND r.target_id = s.id
+LEFT JOIN room_stars rs ON r.target_type = 'star' AND r.target_id = rs.id
+LEFT JOIN rooms rm ON r.target_type = 'room' AND r.target_id = rm.id
+ORDER BY r.created_at DESC LIMIT 100;
+```
 
 ## Cloudflare Workers + D1 배포
 
@@ -19,7 +40,7 @@
 
 1. Cloudflare 계정으로 `npx wrangler login`을 실행합니다. GitHub Actions 배포를 사용할 경우 Cloudflare API 토큰과 계정 ID를 별도 저장소 비밀 변수로 구성해야 하며 코드에 넣지 않습니다.
 2. **D1은 이미 생성되었습니다.** `webecomeeachotherstar-db`의 ID `00907ab5-1365-42f8-9d3e-98009603b65d`는 `wrangler.cloudflare.jsonc`에 반영되어 있습니다. 같은 DB를 다시 만들지 마세요.
-3. `0000_fluffy_gunslinger.sql`, `0001_dazzling_shape.sql`의 테이블과 `d1_migrations` 기록도 2026-11-13에 원격 DB에 적용되었습니다. 이후 새로운 마이그레이션을 추가한 경우에만 `npx wrangler d1 migrations apply webecomeeachotherstar-db --remote --config wrangler.cloudflare.jsonc`를 실행하세요.
+3. `0000_fluffy_gunslinger.sql`, `0001_dazzling_shape.sql`, `0002_reports.sql`, `0003_moderation_indexes.sql`의 테이블·인덱스와 `d1_migrations` 기록은 원격 DB에 적용되었습니다. 이후 새로운 마이그레이션을 추가한 경우에만 `npx wrangler d1 migrations apply webecomeeachotherstar-db --remote --config wrangler.cloudflare.jsonc`를 실행하세요.
 4. `npm run build` 후 `npx wrangler deploy --config wrangler.cloudflare.jsonc`로 Workers와 정적 자산을 배포합니다.
 
 `wrangler.cloudflare.jsonc`는 **사용자 Cloudflare 계정용** 설정입니다. 기존 Sites 배포는 `.openai/hosting.json`과 사이트 전용 빌드 절차를 계속 사용하므로 서로를 덮어쓰지 않습니다. `--remote`가 붙은 D1 명령은 실제 원격 DB를 변경하므로 반드시 대상 DB 이름을 확인하고 실행하세요.

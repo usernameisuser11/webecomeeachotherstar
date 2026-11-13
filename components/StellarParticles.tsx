@@ -39,8 +39,8 @@ out vec3 vColor;out float vAlpha;out float vSeed;
 void main(){
   vec2 p=a0.xy;
   gl_Position=vec4(p.x*2.0-1.0,1.0-p.y*2.0,0.0,1.0);
-  float twinkle=.88+.087*sin(uTime*(.47+a0.w*.74)+a1.w*6.28318)
-                   +.033*sin(uTime*(.19+a1.z*.23)+a0.w*38.0);
+  float twinkle=.88+.12*sin(uTime*(.47+a0.w*.74)+a1.w*6.28318)
+                   +.045*sin(uTime*(.19+a1.z*.23)+a0.w*38.0);
   float pop=a1.y;
   vec3 cyan=vec3(.31,1.22,2.50),blue=vec3(.50,.75,2.54),violet=vec3(1.12,.66,2.30),gold=vec3(2.8,1.36,.48);
   vColor=pop<.38?mix(cyan,blue,pop/.38):mix(blue,violet,clamp((pop-.38)/.56,0.0,1.0));
