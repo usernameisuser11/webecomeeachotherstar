@@ -112,14 +112,18 @@ function mountainHeight(t: number, cfg: RidgeConfig, reliefScale = 1) {
 
 function makeAmbientStars(w: number, h: number): AmbientStar[] {
   const random = rng(20261221);
-  // The static plate carries the faint stars. Only the comparatively bright
-  // foreground points need animation, especially on lower-powered phones.
-  const count = Math.max(340, Math.min(1050, Math.round(w * h / 1300)));
+  // All distinct light points live here (or in the GPU particle layer), so
+  // none gets frozen into the backdrop image. The Milky Way has denser stars.
+  const count = Math.max(520, Math.min(1450, Math.round(w * h / 780)));
   const stars: AmbientStar[] = [];
   for (let i = 0; i < count; i++) {
     const tint = random();
+    const x = random() * w;
+    const y = random() < .31
+      ? clamp((milkyWayCenter(x / w) + (random() + random() + random() - 1.5) * .18) * h, h * .015, h * .77)
+      : random() * h * .77;
     stars.push({
-      x: random() * w, y: random() * h * .77,
+      x, y,
       radius: random() < .024 ? .85 + random() * .65 : .22 + random() * .43,
       alpha: .15 + Math.pow(random(), 2.1) * .68,
       speed: .13 + random() * .47,
@@ -220,21 +224,6 @@ const themePalettes: Record<SkyTheme, { sky: string[]; haze: string[]; water: st
   dawn: { sky: ["#090711", "#130f22", "#292039", "#40364c", "#43313d", "#080b16"], haze: ["153,130,167", "128,121,165", "191,141,119"], water: ["#302339", "#201c2c", "#080b15"] },
 };
 
-// Fast, deterministic noise for the sparse background star distribution.
-function hash2(x: number, y: number, seed: number) {
-  let n = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 2246822519)) | 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177);
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
-}
-function noise2(x: number, y: number, seed: number) {
-  const ix = Math.floor(x), iy = Math.floor(y);
-  const fx = x - ix, fy = y - iy;
-  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-  const a = hash2(ix, iy, seed), b = hash2(ix + 1, iy, seed);
-  const c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
-  return a + (b - a) * ux + (c - a + (d - c - b + a) * ux) * uy;
-}
-
 function milkyWayCenter(u: number) {
   return .73 - .59 * u + Math.sin(u * 4.25 + .35) * .028;
 }
@@ -261,50 +250,8 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
   halo(g, w * .14, h * .77, w * .34, `rgba(${palette.haze[2]},ALPHA)`, .033);
   g.restore();
 
-  // The original Stellar Hand GPU point renderer now draws the sky's light.
-  // Keep only a handful of canvas points for older devices without WebGL2.
-
-  const random = rng(20261113);
-  const count = Math.max(190, Math.min(510, Math.round(w * h / 3200)));
-  const mobileGain = w < 580 ? 1.1 : 1;
-  for (let i = 0; i < count; i++) {
-    const x = random() * w, y = random() * h * .80;
-    const u = x / w, v = y / h;
-    const band = Math.exp(-Math.pow((v - milkyWayCenter(u)) / .12, 2));
-    const luminosity = Math.pow(random(), 3.5);
-    const alpha = Math.min(.63, (.035 + luminosity * .39) * (1 + band * .15) * mobileGain);
-    const r = .14 + random() * .38 + (luminosity > .91 ? .30 : 0);
-    const hue = random();
-    g.fillStyle = hue < .16 ? `rgba(177,207,246,${alpha})` :
-      hue < .26 ? `rgba(246,221,192,${alpha})` : `rgba(232,236,246,${alpha})`;
-    g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
-  }
-
-  // Faint stars cluster along the Milky Way in a softly uneven band. They
-  // remain tiny enough to read as distant light instead of confetti.
-  const clusterCount = Math.max(70, Math.min(250, Math.round(w * h / 3200)));
-  for (let i = 0; i < clusterCount; i++) {
-    const u = random();
-    const v = milkyWayCenter(u) + (random() + random() + random() - 1.5) * .27;
-    if (v < .018 || v > .77) continue;
-    const density = noise2(u * 18, v * 21, 83);
-    if (random() > .30 + density * .62) continue;
-    const x = u * w, y = v * h;
-    const alpha = (.06 + Math.pow(random(), 3) * .27) * mobileGain;
-    g.fillStyle = `rgba(219,229,244,${alpha})`;
-    g.fillRect(x, y, .36 + random() * .47, .36 + random() * .47);
-  }
-
-  // A few unmistakably bright stars anchor the scene. Most of the sky stays
-  // dark, and only these rare points receive a very restrained optical halo.
-  for (let i = 0; i < Math.min(35, Math.max(13, Math.floor(w * h / 33000))); i++) {
-    const x = (.035 + random() * .93) * w;
-    const y = (.04 + random() * .71) * h;
-    const power = .37 + random() * .36;
-    halo(g, x, y, 7 + random() * 7, "rgba(191,214,250,ALPHA)", power * .17);
-    g.fillStyle = `rgba(232,238,252,${power})`;
-    g.beginPath(); g.arc(x, y, .55 + random() * .44, 0, TAU); g.fill();
-  }
+  // The backdrop holds only atmospheric color. Putting star dots here would
+  // leave them permanently static even as nearby GPU stars scintillate.
   return surface;
 }
 
