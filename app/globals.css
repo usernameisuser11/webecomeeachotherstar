@@ -162,7 +162,6 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 .theme-choice.ocean .theme-preview { background:linear-gradient(170deg,#031223 0%,#0c3d55 58%,#3b8387 87%,#0a3041 100%); }
 .theme-choice.dawn .theme-preview { background:linear-gradient(170deg,#100c29 0%,#573358 58%,#b56a70 86%,#402b41 100%); }
 .theme-preview::before { content:""; position:absolute; inset:6px 8px 26px; background-image:radial-gradient(circle,#f8f4fa 0 1px,transparent 1.4px),radial-gradient(circle,#bcd6f9 0 .7px,transparent 1.2px),radial-gradient(circle,#fff 0 .5px,transparent 1px); background-size:23px 22px,19px 30px,12px 17px; background-position:0 0,5px 8px,3px 12px; opacity:.6; }
-.theme-moon { position:absolute; top:14px; right:13px; width:5px; height:5px; border-radius:50%; background:#f4f3ee; box-shadow:0 0 10px 4px #dce6f466; }
 .theme-ridge { position:absolute; left:0; bottom:0; width:100%; height:47px; }
 .theme-ridge svg { display:block; width:100%; height:100%; }
 .theme-ridge .far-hills { fill:#12283f; opacity:.89; }
