@@ -214,8 +214,7 @@ const themePalettes: Record<SkyTheme, { sky: string[]; haze: string[]; water: st
   dawn: { sky: ["#090711", "#130f22", "#292039", "#40364c", "#43313d", "#080b16"], haze: ["153,130,167", "128,121,165", "191,141,119"], water: ["#302339", "#201c2c", "#080b15"] },
 };
 
-// Fast, deterministic two-dimensional value noise. The Milky Way is painted
-// once at reduced resolution, never sampled per pixel during animation.
+// Fast, deterministic noise for the sparse background star distribution.
 function hash2(x: number, y: number, seed: number) {
   let n = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 2246822519)) | 0;
   n = Math.imul(n ^ (n >>> 13), 1274126177);
@@ -232,50 +231,6 @@ function noise2(x: number, y: number, seed: number) {
 
 function milkyWayCenter(u: number) {
   return .73 - .59 * u + Math.sin(u * 4.25 + .35) * .028;
-}
-
-function paintMilkyWay(g: CanvasRenderingContext2D, w: number, h: number, tint: string) {
-  // Small luminous filaments and irregular gaps, rather than decorative
-  // nebula bubbles. Portrait devices use a lower-resolution light plate.
-  const sw = Math.max(100, Math.min(540, Math.round(w * .42)));
-  const sh = Math.max(170, Math.min(440, Math.round(h * .42)));
-  const plate = document.createElement("canvas");
-  plate.width = sw; plate.height = sh;
-  const pc = plate.getContext("2d", { alpha: true });
-  if (!pc) return;
-  const img = pc.createImageData(sw, sh);
-  const [red, green, blue] = tint.split(",").map(Number);
-  const mobileGain = w < 580 ? 1.22 : 1;
-  for (let y = 0; y < sh; y++) {
-    const v = y / sh;
-    for (let x = 0; x < sw; x++) {
-      const u = x / sw;
-      const curl = (noise2(u * 4.6, v * 4.6, 13) - .5) * .105
-        + (noise2(u * 12.6, v * 12.6, 24) - .5) * .019;
-      const d = (v - milkyWayCenter(u) - curl) / .145;
-      const envelope = Math.exp(-1.25 * d * d);
-      if (envelope < .004) continue;
-      const broad = noise2(u * 6.4 + 7, v * 6.4, 33);
-      const knots = noise2(u * 20.5, v * 21.8, 39);
-      const filaments = noise2(u * 46.5, v * 44.3, 51);
-      const density = (.24 + .94 * broad * knots + .28 * filaments);
-      const lane = Math.exp(-Math.pow((d - .06 - .14 * Math.sin(u * 9.7)) / .18, 2));
-      const dust = lane * (.44 + .56 * noise2(u * 15.5, v * 18.7, 71));
-      const luminous = envelope * Math.max(0, density - .48 * dust);
-      const opacity = Math.min(102, luminous * 112 * mobileGain);
-      const i = (y * sw + x) * 4;
-      img.data[i] = red;
-      img.data[i + 1] = green;
-      img.data[i + 2] = blue;
-      img.data[i + 3] = opacity;
-    }
-  }
-  pc.putImageData(img, 0, 0);
-  g.save();
-  g.globalCompositeOperation = "screen";
-  g.imageSmoothingEnabled = true;
-  g.drawImage(plate, 0, 0, w, h);
-  g.restore();
 }
 
 function createBackdrop(w: number, h: number, theme: SkyTheme) {
@@ -300,22 +255,18 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
   halo(g, w * .14, h * .77, w * .34, `rgba(${palette.haze[2]},ALPHA)`, .033);
   g.restore();
 
-  // Milky Way clouds and dust lanes are generated directly on a small canvas.
-  // No photograph, texture download, or static bitmap is used.
-  const dustTint = theme === "ocean" ? "138,183,197" :
-    theme === "dawn" ? "183,170,189" :
-    theme === "violet" ? "168,164,203" : "157,180,211";
-  paintMilkyWay(g, w, h, dustTint);
+  // The original Stellar Hand GPU point renderer now draws the sky's light.
+  // Keep only a handful of canvas points for older devices without WebGL2.
 
   const random = rng(20261113);
-  const count = Math.max(950, Math.min(3100, Math.round(w * h / 460)));
-  const mobileGain = w < 580 ? 1.30 : 1;
+  const count = Math.max(190, Math.min(510, Math.round(w * h / 3200)));
+  const mobileGain = w < 580 ? 1.1 : 1;
   for (let i = 0; i < count; i++) {
     const x = random() * w, y = random() * h * .80;
     const u = x / w, v = y / h;
     const band = Math.exp(-Math.pow((v - milkyWayCenter(u)) / .12, 2));
     const luminosity = Math.pow(random(), 3.5);
-    const alpha = Math.min(.78, (.05 + luminosity * .47) * (1 + band * .25) * mobileGain);
+    const alpha = Math.min(.63, (.035 + luminosity * .39) * (1 + band * .15) * mobileGain);
     const r = .14 + random() * .38 + (luminosity > .91 ? .30 : 0);
     const hue = random();
     g.fillStyle = hue < .16 ? `rgba(177,207,246,${alpha})` :
@@ -325,7 +276,7 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
 
   // Faint stars cluster along the Milky Way in a softly uneven band. They
   // remain tiny enough to read as distant light instead of confetti.
-  const clusterCount = Math.max(900, Math.min(2600, Math.round(w * h / 410)));
+  const clusterCount = Math.max(70, Math.min(250, Math.round(w * h / 3200)));
   for (let i = 0; i < clusterCount; i++) {
     const u = random();
     const v = milkyWayCenter(u) + (random() + random() + random() - 1.5) * .27;
@@ -452,7 +403,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     let backdrop: HTMLCanvasElement | null = null;
     let ambientStars: AmbientStar[] = [];
     let w = 0, h = 0, dpr = 1;
-    let timeZero = performance.now();
+    const timeZero = performance.now();
     const meteors: Meteor[] = [];
     const random = rng(31027);
     let nextMeteor = 2.5;

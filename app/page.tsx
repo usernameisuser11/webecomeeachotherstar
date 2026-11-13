@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Camera, Check, CircleHelp, Heart, Link2, Plus, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import NightSky, { type Glow, type Star } from "../components/NightSky";
+import StellarParticles from "../components/StellarParticles";
 
 type SkyState = { stars: Star[]; glows: Glow[]; liveStarIds: string[] };
 type SkyTheme = "forest" | "violet" | "ocean" | "dawn";
@@ -63,6 +64,7 @@ export default function Home() {
   const [publicRooms, setPublicRooms] = useState<Room[]>([]);
   const [myRooms, setMyRooms] = useState<Room[]>([]);
   const skyCanvas = useRef<HTMLCanvasElement | null>(null);
+  const particleCanvas = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const tokenRef = useRef("");
   const myStarRef = useRef<string | null>(null);
@@ -255,7 +257,15 @@ export default function Home() {
   };
 
   const downloadScene = () => {
-    skyCanvas.current?.toBlob(blob => {
+    const sky = skyCanvas.current;
+    if (!sky) return;
+    const image = document.createElement("canvas");
+    image.width = sky.width; image.height = sky.height;
+    const painter = image.getContext("2d");
+    if (!painter) return;
+    painter.drawImage(sky, 0, 0, image.width, image.height);
+    if (particleCanvas.current) painter.drawImage(particleCanvas.current, 0, 0, image.width, image.height);
+    image.toBlob(blob => {
       if (!blob) return;
       const url = URL.createObjectURL(blob), a = document.createElement("a");
       a.href = url; a.download = `우리가-같은-하늘-아래-${new Date().toISOString().slice(0,10)}.png`;
@@ -285,6 +295,7 @@ export default function Home() {
 
   return <main className="observatory">
     <NightSky stars={sky.stars} glows={sky.glows} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
+    <StellarParticles theme={activeRoom?.theme || "forest"} canvasRef={particleCanvas} />
     <div className="film-grain" aria-hidden="true" /><div className="top-vignette" aria-hidden="true" />
     <header className="topbar">
       <button className="identity" onClick={() => { setIntro(true); setSelectedId(null); setPlacing(false); }} aria-label="처음 화면으로">
@@ -320,7 +331,7 @@ export default function Home() {
         <button className="scene-pill warm" onClick={startCreate}><Sparkles size={17} /> {myStar ? "나의 별" : "별 남기기"}</button>
         <button className={`scene-pill line-switch ${showConstellations ? "on" : ""}`} onClick={() => setShowConstellations(v => { try { localStorage.setItem("our-sky-constellations-v1", v ? "off" : "on"); } catch {} return !v; })} aria-label={showConstellations ? "별자리 선 숨기기" : "별자리 선 표시하기"} aria-pressed={showConstellations}>✧ <span>별자리<span className="line-state"> {showConstellations ? "켜짐" : "꺼짐"}</span></span></button>
         <button className="scene-pill" onClick={() => { setShowerKey(v => v+1); setToast("잠시 하늘을 바라봐 주세요. 유성우가 시작됩니다."); }}><Sparkles size={17} /> 유성우</button>
-        <button className="scene-pill icon-only" onClick={downloadScene} aria-label="밤하늘 사진 저장"><Camera size={18} /></button>
+        <button className="scene-pill icon-only" onClick={downloadScene} aria-label="밤하늘 사진 저장"><Camera size={18} /><span className="photo-label">사진</span></button>
       </section>
       <div className="bottom-annotation"><span className="signal-beam" /> {liveOther ? "지금 이 하늘을 함께 바라보는 친구가 있어요" : "언제든 돌아오실 수 있는 우리의 작은 밤하늘입니다"}</div>
     </>}

@@ -13,6 +13,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 .observatory { width:100%; height:100dvh; min-height:550px; position:relative; overflow:hidden; color:#f6f1ea; isolation:isolate; background:#030a1b; }
 .sky-canvas { position:absolute; inset:0; display:block; width:100%; height:100%; z-index:0; touch-action:manipulation; cursor:crosshair; }
 .sky-canvas.placing { cursor:crosshair; z-index:5; }
+.stellar-particles { position:absolute; inset:0; width:100%; height:100%; display:block; z-index:1; pointer-events:none; mix-blend-mode:screen; -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 82%); mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 82%); }
+.photo-label { display:none; }
 .film-grain { position:absolute; inset:-50%; z-index:1; pointer-events:none; opacity:.038; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.69' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E"); }
 .top-vignette { position:absolute; inset:0; z-index:1; pointer-events:none; background:linear-gradient(180deg,rgba(0,4,14,.40),transparent 24%,transparent 74%,rgba(0,4,14,.48)),radial-gradient(ellipse at 50% 50%,transparent 52%,rgba(0,4,14,.22) 100%); }
 .topbar { position:absolute; z-index:12; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; padding:33px clamp(24px,5.4vw,90px); }
@@ -176,6 +178,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 @keyframes arrive { from { opacity:0; translate:0 8px; } to { opacity:1; translate:0 0; } }
 @keyframes blink { 0%,100% {opacity:.45;} 50% {opacity:1;} }
 @media (max-width:750px) {
+  .observatory { min-height:0; }
   .film-grain { opacity:.027; }
   .top-vignette { background:linear-gradient(180deg,rgba(0,4,14,.32),transparent 22%,transparent 72%,rgba(0,4,14,.45)); }
   .topbar { padding: max(18px,env(safe-area-inset-top)) 18px 14px; }
@@ -220,8 +223,37 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
   .line-switch span { white-space:nowrap; }
   .theme-preview { height:73px; }
 }
+/* On a phone the sky is the main surface; actions should feel like quiet
+   observing controls, not a strip of four oversized dashboard widgets. */
+@media (max-width:750px) {
+  .topbar { padding:calc(15px + env(safe-area-inset-top)) 19px 12px; }
+  .brand-text b { font-size:13px; font-weight:500; letter-spacing:-.04em; }
+  .brand-text em { display:none; }
+  .brand-orbit { width:24px; height:30px; }
+  .round-button { width:36px; height:36px; background:rgba(6,13,27,.22); border-color:rgba(225,235,247,.18); }
+  .sky-room-nav { top:calc(67px + env(safe-area-inset-top)); left:22px; }
+  .current-sky { font-size:12px; color:rgba(236,241,247,.86); border-bottom-color:rgba(195,226,238,.20); }
+  .resting-caption { top:calc(145px + env(safe-area-inset-top)); width:calc(100% - 44px); font-size:11px; letter-spacing:.025em; text-align:center; color:rgba(221,230,243,.68); }
+  .hero { top:clamp(174px,23dvh,248px); bottom:auto; left:24px; right:20px; }
+  .hero h1 { font-size:clamp(33px,8.7vw,43px); line-height:1.21; }
+  .intro-copy { font-size:12px; line-height:1.72; margin:15px 0 20px; color:rgba(225,230,241,.83); }
+  .primary-cta { min-height:44px; padding:11px 15px; }
+  .quiet-cta { padding:10px 6px; }
+  .scene-controls { left:14px; right:14px; bottom:calc(11px + env(safe-area-inset-bottom)); display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; border-top:1px solid rgba(196,215,232,.18); padding-top:9px; background:linear-gradient(180deg,rgba(1,8,19,0),rgba(1,8,19,.32)); }
+  .scene-pill,.scene-pill.icon-only { border:0; background:transparent; backdrop-filter:none; width:auto; min-width:0; min-height:50px; padding:4px 0; border-radius:0; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:5px; font-size:11px; color:rgba(221,233,243,.82); }
+  .scene-pill.warm { color:#d5f0e8; border:0; }
+  .scene-pill svg { width:18px; height:18px; stroke-width:1.4; }
+  .photo-label { display:inline; }
+  .scene-pill:hover { background:transparent; }
+  .bottom-annotation { left:14px; right:14px; bottom:calc(88px + env(safe-area-inset-bottom)); justify-content:center; text-align:center; font-size:10px; color:rgba(202,215,231,.68); gap:8px; }
+  .signal-beam { width:4px; height:4px; flex:none; }
+  .star-index { bottom:calc(119px + env(safe-area-inset-bottom)); left:18px; width:calc(100% - 36px); }
+  .star-card { bottom:calc(155px + env(safe-area-inset-bottom)); }
+  .placement-banner { top:calc(125px + env(safe-area-inset-top)); }
+  .toast { bottom:calc(169px + env(safe-area-inset-bottom)); }
+}
 @media (max-width:420px) and (min-height:730px) {
-  .hero { bottom:clamp(100px,13dvh,132px); }
+  .hero { top:clamp(174px,23dvh,230px); bottom:auto; }
 }
 @media (max-width:380px) {
   .topbar { padding-left:15px; padding-right:15px; }
@@ -235,10 +267,10 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
   .hero { left:19px; right:13px; }
   .hero h1 { font-size:clamp(33px,9.9vw,38px); }
   .hero-ending { font-size:.81em; }
-  .scene-controls { left:12px; right:12px; }
-  .scene-pill { padding:0 8px; font-size:10px; gap:4px; }
-  .scene-pill svg { width:15px; height:15px; }
-  .scene-pill.icon-only { width:34px; flex:none; }
+  .scene-controls { left:10px; right:10px; }
+  .scene-pill { padding:4px 0; font-size:10px; gap:5px; }
+  .scene-pill svg { width:17px; height:17px; }
+  .scene-pill.icon-only { width:auto; }
   .line-state { display:none; }
   .room-sheet { padding-left:18px; padding-right:18px; }
   .theme-choices { gap:5px; }
@@ -247,8 +279,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
   .theme-preview { height:68px; }
 }
 @media (max-height:690px) and (max-width:750px) {
-  .hero { bottom:105px; }
-  .hero h1 { font-size:38px; }
+  .hero { top:clamp(142px,20dvh,190px); bottom:auto; }
+  .hero h1 { font-size:34px; }
   .intro-copy { margin:10px 0 12px; }
   .hero-footnote { display:none; }
   .topbar { padding-top:15px; }
