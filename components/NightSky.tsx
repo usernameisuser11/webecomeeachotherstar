@@ -22,7 +22,7 @@ type Props = {
   onSelectStar: (id: string) => void;
 };
 
-type Meteor = { x: number; y: number; vx: number; vy: number; length: number; born: number; life: number; bright: number; warmth: number; seed: number };
+type Meteor = { x: number; y: number; vx: number; vy: number; length: number; born: number; life: number; bright: number; warmth: number };
 type AmbientStar = { x: number; y: number; radius: number; alpha: number; speed: number; phase: number; tint: string };
 type ConstellationLink = { a: Star; b: Star; distance: number; key: string };
 
@@ -462,14 +462,16 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     resize();
 
     function spawnMeteor(t: number, bright = 1) {
-      const x = w * (.29 + random() * .84), y = h * (.06 + random() * .42);
-      const velocity = Math.max(125, Math.min(w, h) * .23) + random() * 115;
-      const slope = .31 + random() * .17;
+      // A shallow, shared radiant: the reference's blue meteors drift from
+      // upper-right toward lower-left, but never march in perfect parallel.
+      const x = w * (.22 + random() * .90), y = h * (.055 + random() * .43);
+      const velocity = 85 + random() * 77;
+      const slope = .48 + random() * .31;
       meteors.push({
-        x, y, vx: -velocity * .96, vy: velocity * slope,
-        born: t, length: Math.min(w * .66, (95 + random() * 115) * (bright > 1.1 ? 1.22 : 1)),
-        life: 2.0 + random() * .9,
-        bright, warmth: random(), seed: random() * 100,
+        x, y, vx: -velocity, vy: velocity * slope,
+        born: t, length: Math.min(w * .47, (82 + random() * 96) * (bright > 1.1 ? 1.18 : 1)),
+        life: 3.15 + random() * 1.15,
+        bright, warmth: random(),
       });
     }
 
@@ -517,48 +519,42 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       }
       if (t > nextMeteor) {
         const progress = isShower ? clamp((t - showerStartedAt) / 22, 0, 1) : 0;
-        const intensity = isShower ? .68 + .32 * Math.sin(Math.PI * progress) : 0;
-        spawnMeteor(t, isShower ? .77 + random() * .30 : .55);
-        nextMeteor = t + (isShower ? (.56 + random() * .65) / intensity : 13 + random() * 17);
+        const intensity = isShower ? .83 + .17 * Math.sin(Math.PI * progress) : 0;
+        spawnMeteor(t, isShower ? .79 + random() * .25 : .58);
+        nextMeteor = t + (isShower ? (.45 + random() * .33) / intensity : 13 + random() * 17);
       }
       for (let i = meteors.length - 1; i >= 0; i--) {
         const m = meteors[i];
         const age = t - m.born;
         if (age > m.life) { meteors.splice(i, 1); continue; }
         const px = m.x + age * m.vx, py = m.y + age * m.vy;
-        const alpha = Math.pow(Math.sin(Math.PI * age / m.life), .85) * m.bright;
-        const len = m.length * clamp(age / .48, 0, 1);
+        const fadeIn = clamp(age / .35, 0, 1);
+        const fadeOut = clamp((m.life - age) / .92, 0, 1);
+        const alpha = Math.pow(fadeIn, .7) * Math.pow(fadeOut, .8) * m.bright;
+        const len = m.length * clamp(age / .62, 0, 1);
         const dist = Math.hypot(m.vx, m.vy);
         const tailX = px - (m.vx / dist) * len, tailY = py - (m.vy / dist) * len;
         ctx.save(); ctx.globalCompositeOperation = "screen";
         ctx.lineCap = "round";
-        const warm = m.warmth > .79;
-        const coreColor = warm ? "255,226,202" : "225,246,255";
-        const tailColor = warm ? "251,169,141" : "103,190,244";
+        const warm = m.warmth > .95;
+        const coreColor = warm ? "255,237,216" : "232,251,255";
+        const tailColor = warm ? "245,194,159" : "72,170,241";
         for (const layer of [
-          { width: 4.7, power: .13 },
-          { width: 1.1, power: .78 },
+          { width: 6.3, power: .11 },
+          { width: 1.25, power: .83 },
         ]) {
           const stroke = ctx.createLinearGradient(px, py, tailX, tailY);
           stroke.addColorStop(0, `rgba(${coreColor},${clamp(alpha * layer.power, 0, 1)})`);
-          stroke.addColorStop(.18, `rgba(${tailColor},${clamp(alpha * layer.power * .69, 0, 1)})`);
-          stroke.addColorStop(.62, `rgba(${tailColor},${clamp(alpha * layer.power * .16, 0, 1)})`);
+          stroke.addColorStop(.18, `rgba(${tailColor},${clamp(alpha * layer.power * .70, 0, 1)})`);
+          stroke.addColorStop(.62, `rgba(${tailColor},${clamp(alpha * layer.power * .13, 0, 1)})`);
           stroke.addColorStop(1, `rgba(${tailColor},0)`);
           ctx.strokeStyle = stroke;
           ctx.lineWidth = layer.width * (m.bright > 1.1 ? 1.13 : 1);
           ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(tailX, tailY); ctx.stroke();
         }
-        halo(ctx, px, py, 8 + m.bright * 8, warm ? "rgba(255,206,173,ALPHA)" : "rgba(166,225,255,ALPHA)", clamp(alpha * .36, 0, .6));
-        for (let p = 1; p <= 6; p++) {
-          const u = p / 7;
-          const drift = Math.sin(m.seed * 13 + p * 3.5 + age * 1.4) * (1 + u * 3.2);
-          const dx = (m.vy / dist) * drift;
-          const dy = (-m.vx / dist) * drift;
-          const tx = px + (tailX - px) * u + dx;
-          const ty = py + (tailY - py) * u + dy;
-          ctx.fillStyle = `rgba(${tailColor},${clamp(alpha * (1-u) * .23, 0, .45)})`;
-          ctx.beginPath(); ctx.arc(tx, ty, .23 + ((p * 7 + Math.floor(m.seed * 10)) % 4) * .09, 0, TAU); ctx.fill();
-        }
+        halo(ctx, px, py, 9 + m.bright * 8, warm ? "rgba(255,218,188,ALPHA)" : "rgba(148,218,255,ALPHA)", clamp(alpha * .37, 0, .58));
+        ctx.fillStyle = `rgba(${coreColor},${clamp(alpha * .94, 0, 1)})`;
+        ctx.beginPath(); ctx.arc(px, py, m.bright > 1.1 ? 1.47 : 1.07, 0, TAU); ctx.fill();
         ctx.restore();
       }
 
