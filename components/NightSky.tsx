@@ -41,7 +41,7 @@ function valueNoise(x: number, seed: number) {
 type RidgePoint = { x: number; height: number };
 type RidgeConfig = { base: number; roughness: number; seed: number; profile: RidgePoint[]; top: string; bottom: string; opacity?: number };
 const farRidge: RidgeConfig = {
-  base: .803, roughness: .020, seed: 4.9, top: "#364260", bottom: "#14253f", opacity: .91,
+  base: .803, roughness: .020, seed: 4.9, top: "#27394e", bottom: "#0c1928", opacity: .90,
   profile: [
     { x: -.12, height: .026 }, { x: .00, height: .047 },
     { x: .09, height: .064 }, { x: .17, height: .052 },
@@ -54,7 +54,7 @@ const farRidge: RidgeConfig = {
   ],
 };
 const middleRidge: RidgeConfig = {
-  base: .860, roughness: .014, seed: 12.7, top: "#233451", bottom: "#081a31",
+  base: .860, roughness: .014, seed: 12.7, top: "#12263b", bottom: "#071322",
   profile: [
     { x: -.12, height: .037 }, { x: .00, height: .076 },
     { x: .06, height: .092 }, { x: .14, height: .058 },
@@ -67,7 +67,7 @@ const middleRidge: RidgeConfig = {
   ],
 };
 const shoreRidge: RidgeConfig = {
-  base: .920, roughness: .004, seed: 23.6, top: "#0b1a2a", bottom: "#010813",
+  base: .920, roughness: .004, seed: 23.6, top: "#081725", bottom: "#01060f",
   profile: [
     { x: -.12, height: .018 }, { x: .00, height: .026 },
     { x: .18, height: .018 }, { x: .31, height: .014 },
@@ -106,17 +106,19 @@ function mountainHeight(t: number, cfg: RidgeConfig, reliefScale = 1) {
 
 function makeAmbientStars(w: number, h: number): AmbientStar[] {
   const random = rng(20261221);
-  const count = Math.max(680, Math.min(1700, Math.round(w * h / 700)));
+  // The static plate carries the faint stars. Only the comparatively bright
+  // foreground points need animation, especially on lower-powered phones.
+  const count = Math.max(340, Math.min(1050, Math.round(w * h / 1300)));
   const stars: AmbientStar[] = [];
   for (let i = 0; i < count; i++) {
     const tint = random();
     stars.push({
-      x: random() * w, y: random() * h * .79,
-      radius: random() < .036 ? .95 + random() * .72 : .24 + random() * .56,
-      alpha: .13 + Math.pow(random(), 2.15) * .75,
-      speed: .28 + random() * .82,
+      x: random() * w, y: random() * h * .77,
+      radius: random() < .024 ? .85 + random() * .65 : .22 + random() * .43,
+      alpha: .15 + Math.pow(random(), 2.1) * .68,
+      speed: .13 + random() * .47,
       phase: random() * TAU,
-      tint: tint < .18 ? "161,206,255" : tint < .33 ? "240,197,228" : "232,239,255",
+      tint: tint < .17 ? "177,207,255" : tint < .27 ? "255,223,194" : "226,234,247",
     });
   }
   return stars;
@@ -206,11 +208,75 @@ function livingStar(ctx: CanvasRenderingContext2D, x: number, y: number, hue: nu
 }
 
 const themePalettes: Record<SkyTheme, { sky: string[]; haze: string[]; water: string[] }> = {
-  forest: { sky: ["#020a1c", "#0a1231", "#151d42", "#27314f", "#0a172e", "#020b18"], haze: ["94,62,182", "31,101,180", "246,138,113"], water: ["#101e32", "#091a2a", "#020b17"] },
-  violet: { sky: ["#07051d", "#170b37", "#2c174d", "#3b255e", "#181432", "#080b1d"], haze: ["180,75,202", "86,89,219", "235,124,183"], water: ["#231832", "#170e27", "#07091a"] },
-  ocean: { sky: ["#020d1b", "#06243d", "#103a51", "#1c5464", "#0b293a", "#03101d"], haze: ["48,159,173", "36,119,196", "114,210,193"], water: ["#0b3443", "#072b36", "#02131f"] },
-  dawn: { sky: ["#0c0a24", "#221636", "#47304d", "#76516b", "#3b2d45", "#0f1426"], haze: ["196,101,171", "120,109,213", "255,170,115"], water: ["#493148", "#251e36", "#0d1122"] },
+  forest: { sky: ["#01040a", "#020813", "#061022", "#0e1b2c", "#162231", "#030913"], haze: ["86,107,133", "61,85,120", "144,126,106"], water: ["#0a1725", "#071321", "#010712"] },
+  violet: { sky: ["#03040d", "#080a1c", "#13172d", "#22243a", "#23253a", "#060914"], haze: ["119,112,149", "96,104,148", "161,124,143"], water: ["#15182b", "#101427", "#030713"] },
+  ocean: { sky: ["#01060b", "#03111c", "#092432", "#10363e", "#15323d", "#020a12"], haze: ["85,145,152", "62,122,146", "137,161,147"], water: ["#092831", "#08212e", "#020a13"] },
+  dawn: { sky: ["#090711", "#130f22", "#292039", "#40364c", "#43313d", "#080b16"], haze: ["153,130,167", "128,121,165", "191,141,119"], water: ["#302339", "#201c2c", "#080b15"] },
 };
+
+// Fast, deterministic two-dimensional value noise. The Milky Way is painted
+// once at reduced resolution, never sampled per pixel during animation.
+function hash2(x: number, y: number, seed: number) {
+  let n = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 2246822519)) | 0;
+  n = Math.imul(n ^ (n >>> 13), 1274126177);
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+}
+function noise2(x: number, y: number, seed: number) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy, seed), b = hash2(ix + 1, iy, seed);
+  const c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
+  return a + (b - a) * ux + (c - a + (d - c - b + a) * ux) * uy;
+}
+
+function milkyWayCenter(u: number) {
+  return .73 - .59 * u + Math.sin(u * 4.25 + .35) * .028;
+}
+
+function paintMilkyWay(g: CanvasRenderingContext2D, w: number, h: number, tint: string) {
+  // Small luminous filaments and irregular gaps, rather than decorative
+  // nebula bubbles. Portrait devices use a lower-resolution light plate.
+  const sw = Math.max(100, Math.min(540, Math.round(w * .42)));
+  const sh = Math.max(170, Math.min(440, Math.round(h * .42)));
+  const plate = document.createElement("canvas");
+  plate.width = sw; plate.height = sh;
+  const pc = plate.getContext("2d", { alpha: true });
+  if (!pc) return;
+  const img = pc.createImageData(sw, sh);
+  const [red, green, blue] = tint.split(",").map(Number);
+  const mobileGain = w < 580 ? 1.22 : 1;
+  for (let y = 0; y < sh; y++) {
+    const v = y / sh;
+    for (let x = 0; x < sw; x++) {
+      const u = x / sw;
+      const curl = (noise2(u * 4.6, v * 4.6, 13) - .5) * .105
+        + (noise2(u * 12.6, v * 12.6, 24) - .5) * .019;
+      const d = (v - milkyWayCenter(u) - curl) / .145;
+      const envelope = Math.exp(-1.25 * d * d);
+      if (envelope < .004) continue;
+      const broad = noise2(u * 6.4 + 7, v * 6.4, 33);
+      const knots = noise2(u * 20.5, v * 21.8, 39);
+      const filaments = noise2(u * 46.5, v * 44.3, 51);
+      const density = (.20 + .77 * broad * knots + .22 * filaments);
+      const lane = Math.exp(-Math.pow((d - .06 - .14 * Math.sin(u * 9.7)) / .18, 2));
+      const dust = lane * (.44 + .56 * noise2(u * 15.5, v * 18.7, 71));
+      const luminous = envelope * Math.max(0, density - .62 * dust);
+      const opacity = Math.min(88, luminous * 85 * mobileGain);
+      const i = (y * sw + x) * 4;
+      img.data[i] = red;
+      img.data[i + 1] = green;
+      img.data[i + 2] = blue;
+      img.data[i + 3] = opacity;
+    }
+  }
+  pc.putImageData(img, 0, 0);
+  g.save();
+  g.globalCompositeOperation = "screen";
+  g.imageSmoothingEnabled = true;
+  g.drawImage(plate, 0, 0, w, h);
+  g.restore();
+}
 
 function createBackdrop(w: number, h: number, theme: SkyTheme) {
   const palette = themePalettes[theme];
@@ -225,39 +291,63 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
   g.fillStyle = sky;
   g.fillRect(0, 0, w, h);
 
-  // The light and cloud fields are drawn procedurally; no photographic background assets.
+  // Real dark-sky photographs have a nearly black zenith and a much softer
+  // atmospheric glow near the horizon. Avoid the saturated neon cloud halos.
+  g.save();
   g.globalCompositeOperation = "screen";
-  halo(g, w * .74, h * .47, w * .45, `rgba(${palette.haze[0]},ALPHA)`, .20);
-  halo(g, w * .27, h * .32, w * .54, `rgba(${palette.haze[1]},ALPHA)`, .21);
-  halo(g, w * .52, h * .70, w * .42, `rgba(${palette.haze[2]},ALPHA)`, .16);
+  halo(g, w * .47, h * .80, w * .57, `rgba(${palette.haze[0]},ALPHA)`, .065);
+  halo(g, w * .87, h * .69, w * .39, `rgba(${palette.haze[1]},ALPHA)`, .048);
+  halo(g, w * .14, h * .77, w * .34, `rgba(${palette.haze[2]},ALPHA)`, .033);
+  g.restore();
+
+  // Milky Way clouds and dust lanes are generated directly on a small canvas.
+  // No photograph, texture download, or static bitmap is used.
+  const dustTint = theme === "ocean" ? "138,183,197" :
+    theme === "dawn" ? "183,170,189" :
+    theme === "violet" ? "168,164,203" : "157,180,211";
+  paintMilkyWay(g, w, h, dustTint);
+
   const random = rng(20261113);
-
-  for (let i = 0; i < 108; i++) {
-    const t = random() * 1.25 - .1;
-    const x = t * w;
-    const y = (.13 + t * .43 + Math.sin(t * 4.3) * .07) * h;
-    const offset = (random() - .5) * h * .25;
-    const size = (22 + random() * 70) * Math.min(w / 700, 1.3) + 27;
-    const tone = random();
-    halo(g, x, y + offset, size, tone < .36 ? "rgba(100,104,221,ALPHA)" : tone < .72 ? "rgba(40,149,186,ALPHA)" : "rgba(199,84,148,ALPHA)", .018 + random() * .043);
-  }
-
-  // A slightly tilted Milky Way, with scattered distant dust and dense stellar knots.
-  for (let i = 0; i < 6200; i++) {
-    const x = random() * w;
-    const xNorm = x / w;
-    const pathY = (.085 + xNorm * .42 + Math.sin(xNorm * 4.6) * .065) * h;
-    const spread = (random() + random() + random() - 1.5) * h * .20;
-    const y = pathY + spread;
-    if (y < 0 || y > h * .76) continue;
-    const a = .02 + Math.pow(random(), 2) * .45;
-    const r = random() < .012 ? 1.25 : .22 + random() * .55;
-    const tint = random();
-    g.fillStyle = tint < .2 ? `rgba(239,184,223,${a})` : tint < .48 ? `rgba(122,205,245,${a})` : `rgba(230,227,255,${a})`;
+  const count = Math.max(950, Math.min(3100, Math.round(w * h / 460)));
+  const mobileGain = w < 580 ? 1.30 : 1;
+  for (let i = 0; i < count; i++) {
+    const x = random() * w, y = random() * h * .80;
+    const u = x / w, v = y / h;
+    const band = Math.exp(-Math.pow((v - milkyWayCenter(u)) / .12, 2));
+    const luminosity = Math.pow(random(), 3.5);
+    const alpha = Math.min(.78, (.05 + luminosity * .47) * (1 + band * .25) * mobileGain);
+    const r = .14 + random() * .38 + (luminosity > .91 ? .30 : 0);
+    const hue = random();
+    g.fillStyle = hue < .16 ? `rgba(177,207,246,${alpha})` :
+      hue < .26 ? `rgba(246,221,192,${alpha})` : `rgba(232,236,246,${alpha})`;
     g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
   }
-  // Individual foreground stars are animated in render(), not baked into this image.
-  g.globalCompositeOperation = "source-over";
+
+  // Faint stars cluster along the Milky Way in a softly uneven band. They
+  // remain tiny enough to read as distant light instead of confetti.
+  const clusterCount = Math.max(900, Math.min(2600, Math.round(w * h / 410)));
+  for (let i = 0; i < clusterCount; i++) {
+    const u = random();
+    const v = milkyWayCenter(u) + (random() + random() + random() - 1.5) * .27;
+    if (v < .018 || v > .77) continue;
+    const density = noise2(u * 18, v * 21, 83);
+    if (random() > .30 + density * .62) continue;
+    const x = u * w, y = v * h;
+    const alpha = (.06 + Math.pow(random(), 3) * .27) * mobileGain;
+    g.fillStyle = `rgba(219,229,244,${alpha})`;
+    g.fillRect(x, y, .36 + random() * .47, .36 + random() * .47);
+  }
+
+  // A few unmistakably bright stars anchor the scene. Most of the sky stays
+  // dark, and only these rare points receive a very restrained optical halo.
+  for (let i = 0; i < Math.min(35, Math.max(13, Math.floor(w * h / 33000))); i++) {
+    const x = (.035 + random() * .93) * w;
+    const y = (.04 + random() * .71) * h;
+    const power = .37 + random() * .36;
+    halo(g, x, y, 7 + random() * 7, "rgba(191,214,250,ALPHA)", power * .17);
+    g.fillStyle = `rgba(232,238,252,${power})`;
+    g.beginPath(); g.arc(x, y, .55 + random() * .44, 0, TAU); g.fill();
+  }
   return surface;
 }
 
@@ -276,22 +366,22 @@ function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: Ridg
   ctx.fillStyle = gradient; ctx.fill();
   ctx.clip();
 
-  // Terrain facets follow the mountains' slopes instead of horizontal repeating dashes.
+  // Sparse erosion marks are barely perceptible at night.
   const seed = config.seed;
-  for (let i = 0; i < 215; i++) {
+  for (let i = 0; i < 85; i++) {
     const x = hash1(i * 2, seed + 8) * w;
     const y = heightAt(x) + 6 + hash1(i, seed + 17) * 95;
     const slope = heightAt(x + 6) - heightAt(x - 6);
     const dx = clamp(slope * .8, -17, 17) + (hash1(i, seed + 23) - .5) * 8;
     const dy = 5 + hash1(i, seed + 31) * 27;
-    ctx.strokeStyle = i % 3 === 0 ? "rgba(172,192,218,.058)" : "rgba(33,59,89,.14)";
+    ctx.strokeStyle = i % 3 === 0 ? "rgba(172,192,218,.028)" : "rgba(33,59,89,.085)";
     ctx.lineWidth = i % 4 === 0 ? .8 : .45;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx, y + dy); ctx.stroke();
   }
   ctx.restore();
 
   ctx.save();
-  ctx.strokeStyle = `rgba(173,190,222,${config.seed < 6 ? .09 : .045})`;
+  ctx.strokeStyle = `rgba(173,190,222,${config.seed < 6 ? .04 : .021})`;
   ctx.lineWidth = .6;
   ctx.beginPath();
   for (let x = 0; x <= w + 4; x += 3) {
@@ -305,8 +395,8 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   const waterY = h * .835;
   // Faint atmospheric haze just behind the distant mountain peaks.
   const mist = ctx.createLinearGradient(0, h * .68, 0, h * .89);
-  mist.addColorStop(0, "rgba(139,139,193,0)");
-  mist.addColorStop(.68, "rgba(114,134,180,.115)");
+  mist.addColorStop(0, "rgba(114,137,166,0)");
+  mist.addColorStop(.68, "rgba(96,124,156,.053)");
   mist.addColorStop(1, "rgba(29,57,88,0)");
   ctx.fillStyle = mist; ctx.fillRect(0, h * .67, w, h * .24);
   ridge(ctx, w, h, farRidge);
@@ -318,25 +408,26 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   ctx.fillStyle = lake; ctx.fillRect(0, waterY, w, h - waterY);
   // Without a moon, the lake catches dispersed starlight rather than a
   // concentrated vertical reflection that would suggest an unseen light source.
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 65; i++) {
     const x = ((i * 73.71) % w), y = waterY + ((i * 17.3) % (h - waterY));
     const len = 4 + (i % 11) * 3;
-    ctx.fillStyle = `rgba(${i % 4 ? '127,156,198' : '228,156,151'},${.025 + (Math.sin(t * .6 + i) + 1) * .025})`;
+    ctx.fillStyle = `rgba(${i % 4 ? '127,156,198' : '183,172,160'},${.015 + (Math.sin(t * .6 + i) + 1) * .019})`;
     ctx.fillRect(x + Math.sin(t * .45 + i * 3) * 8, y, len, .65);
   }
 
-  // The foreground shore and countless individual trees create a readable scale.
+  // The foreground shore is nearly black; only a handful of distant trees
+  // should remain visible in low light, avoiding a row of black pixel specks.
   ridge(ctx, w, h, shoreRidge);
   const treeRand = rng(88112);
-  for (let i = 0; i < 155; i++) {
+  for (let i = 0; i < 58; i++) {
     const x = treeRand() * w;
     const d = treeRand();
     const y = h * (.835 + d * .15);
-    const height = (3 + d * 19) * (w < 580 ? .65 : 1);
-    ctx.strokeStyle = `rgba(2,12,23,${.36 + d * .6})`;
-    ctx.lineWidth = 1.4 + d * 1.5;
+    const height = (2 + d * 13) * (w < 580 ? .65 : 1);
+    ctx.strokeStyle = `rgba(2,12,23,${.22 + d * .48})`;
+    ctx.lineWidth = .9 + d * 1.2;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - height); ctx.stroke();
-    ctx.fillStyle = `rgba(2,13,25,${.45 + d * .48})`;
+    ctx.fillStyle = `rgba(2,13,25,${.24 + d * .45})`;
     for (let j = 0; j < 4; j++) {
       const yy = y - height * (.36 + j * .17);
       const ww = height * (.39 - j * .07);
@@ -436,10 +527,11 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       ctx.clearRect(0, 0, w, h);
       if (backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
 
-      // Every visible foreground star breathes at its own pace, as real starlight does.
+      // Slow scintillation, with a nearly constant baseline. Stars should not
+      // pulse in unison or flash like a UI particle effect.
       ctx.save(); ctx.globalCompositeOperation = "screen";
       for (const star of ambientStars) {
-        const breath = clamp(.79 + .18 * Math.sin(t * star.speed + star.phase) + .08 * Math.sin(t * star.speed * .37 + star.phase * 1.9), .51, 1.05);
+        const breath = clamp(.88 + .085 * Math.sin(t * star.speed + star.phase) + .035 * Math.sin(t * star.speed * 1.7 + star.phase * 1.9), .73, 1.03);
         const alpha = star.alpha * breath;
         ctx.fillStyle = `rgba(${star.tint},${alpha})`;
         if (star.radius < .72) {
@@ -447,29 +539,6 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         } else {
           ctx.beginPath(); ctx.arc(star.x, star.y, star.radius, 0, TAU); ctx.fill();
         }
-      }
-      ctx.restore();
-
-      ctx.save(); ctx.globalCompositeOperation = "screen";
-      // Slow, translucent curtains drifting across the distant sky.
-      for (let ribbon = 0; ribbon < 3; ribbon++) {
-        const x0 = -.24 * w, y0 = (.22 + ribbon * .09) * h;
-        const grad = ctx.createLinearGradient(0, y0 - h * .13, 0, y0 + h * .30);
-        grad.addColorStop(0, "rgba(76,126,208,0)");
-        grad.addColorStop(.33, ribbon % 2 ? "rgba(109,77,183,.024)" : "rgba(49,145,154,.023)");
-        grad.addColorStop(.6, ribbon % 2 ? "rgba(152,82,177,.016)" : "rgba(72,120,210,.020)");
-        grad.addColorStop(1, "rgba(63,110,154,0)");
-        ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.moveTo(x0, y0);
-        for (let x = 0; x <= w + w * .25; x += 16) {
-          const f = x / w;
-          ctx.lineTo(x, y0 + Math.sin(f * 4.5 + t * .075 + ribbon) * 29 + f * h * .14);
-        }
-        for (let x = w + w * .25; x >= x0; x -= 16) {
-          const f = x / w;
-          ctx.lineTo(x, y0 + h * .23 + Math.sin(f * 3.7 + t * .07 + ribbon + .6) * 44 + f * h * .12);
-        }
-        ctx.closePath(); ctx.fill();
       }
       ctx.restore();
 
