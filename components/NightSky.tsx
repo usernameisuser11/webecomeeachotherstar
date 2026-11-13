@@ -258,11 +258,11 @@ function paintMilkyWay(g: CanvasRenderingContext2D, w: number, h: number, tint: 
       const broad = noise2(u * 6.4 + 7, v * 6.4, 33);
       const knots = noise2(u * 20.5, v * 21.8, 39);
       const filaments = noise2(u * 46.5, v * 44.3, 51);
-      const density = (.20 + .77 * broad * knots + .22 * filaments);
+      const density = (.24 + .94 * broad * knots + .28 * filaments);
       const lane = Math.exp(-Math.pow((d - .06 - .14 * Math.sin(u * 9.7)) / .18, 2));
       const dust = lane * (.44 + .56 * noise2(u * 15.5, v * 18.7, 71));
-      const luminous = envelope * Math.max(0, density - .62 * dust);
-      const opacity = Math.min(88, luminous * 85 * mobileGain);
+      const luminous = envelope * Math.max(0, density - .48 * dust);
+      const opacity = Math.min(102, luminous * 112 * mobileGain);
       const i = (y * sw + x) * 4;
       img.data[i] = red;
       img.data[i + 1] = green;
