@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Camera, Check, CircleHelp, Heart, Link2, MoonStar, Plus, Sparkles, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowUpRight, Camera, Check, CircleHelp, Heart, Link2, Plus, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import NightSky, { type Glow, type Star } from "../components/NightSky";
 
 type SkyState = { stars: Star[]; glows: Glow[]; liveStarIds: string[] };
@@ -319,7 +319,7 @@ export default function Home() {
       <section className="scene-controls" aria-label="밤하늘 기능">
         <button className="scene-pill warm" onClick={startCreate}><Sparkles size={17} /> {myStar ? "나의 별" : "별 남기기"}</button>
         <button className={`scene-pill line-switch ${showConstellations ? "on" : ""}`} onClick={() => setShowConstellations(v => { try { localStorage.setItem("our-sky-constellations-v1", v ? "off" : "on"); } catch {} return !v; })} aria-label={showConstellations ? "별자리 선 숨기기" : "별자리 선 표시하기"} aria-pressed={showConstellations}>✧ <span>별자리<span className="line-state"> {showConstellations ? "켜짐" : "꺼짐"}</span></span></button>
-        <button className="scene-pill" onClick={() => { setShowerKey(v => v+1); setToast("잠시 하늘을 바라봐 주세요. 유성우가 시작됩니다."); }}><MoonStar size={17} /> 유성우</button>
+        <button className="scene-pill" onClick={() => { setShowerKey(v => v+1); setToast("잠시 하늘을 바라봐 주세요. 유성우가 시작됩니다."); }}><Sparkles size={17} /> 유성우</button>
         <button className="scene-pill icon-only" onClick={downloadScene} aria-label="밤하늘 사진 저장"><Camera size={18} /></button>
       </section>
       <div className="bottom-annotation"><span className="signal-beam" /> {liveOther ? "지금 이 하늘을 함께 바라보는 친구가 있어요" : "언제든 돌아오실 수 있는 우리의 작은 밤하늘입니다"}</div>
@@ -378,7 +378,7 @@ export default function Home() {
           </div>
           <div className="room-field-label">밤하늘의 분위기</div>
           <div className="theme-choices" role="group" aria-label="밤하늘 배경 선택">
-            {themes.map(theme => <button key={theme.id} className={`theme-choice ${theme.id} ${roomTheme === theme.id ? "picked" : ""}`} onClick={() => setRoomTheme(theme.id)} aria-pressed={roomTheme === theme.id}><span className="theme-preview"><span className="theme-moon" /><span className="theme-ridge"><svg viewBox="0 0 120 60" preserveAspectRatio="none" aria-hidden="true"><path className="far-hills" d="M0 42 C9 40 13 34 21 33 C30 32 33 36 40 36 C48 34 53 20 62 21 C71 22 77 31 84 33 C95 34 99 29 108 34 C114 36 118 39 120 39 L120 60 L0 60 Z" /><path className="near-hills" d="M0 49 C12 45 17 44 25 47 C35 49 39 45 46 41 C53 38 58 45 66 46 C76 48 83 39 92 40 C102 40 109 47 120 47 L120 60 L0 60 Z" /></svg></span></span><b>{theme.label}</b><small>{theme.note}</small></button>)}
+            {themes.map(theme => <button key={theme.id} className={`theme-choice ${theme.id} ${roomTheme === theme.id ? "picked" : ""}`} onClick={() => setRoomTheme(theme.id)} aria-pressed={roomTheme === theme.id}><span className="theme-preview"><span className="theme-ridge"><svg viewBox="0 0 120 60" preserveAspectRatio="none" aria-hidden="true"><path className="far-hills" d="M0 42 C9 40 13 34 21 33 C30 32 33 36 40 36 C48 34 53 20 62 21 C71 22 77 31 84 33 C95 34 99 29 108 34 C114 36 118 39 120 39 L120 60 L0 60 Z" /><path className="near-hills" d="M0 49 C12 45 17 44 25 47 C35 49 39 45 46 41 C53 38 58 45 66 46 C76 48 83 39 92 40 C102 40 109 47 120 47 L120 60 L0 60 Z" /></svg></span></span><b>{theme.label}</b><small>{theme.note}</small></button>)}
           </div>
           <p className="sheet-small-note">비공개 방도 초대 링크를 가진 분은 들어올 수 있습니다. 민감한 이야기는 남기지 말아 주세요.</p>
           <button className="sheet-action" disabled={busy} onClick={createRoom}>하늘 열기 <span>↗</span></button>
