@@ -136,6 +136,98 @@ function makeStars(width: number, height: number) {
   return { values, count };
 }
 
+// The same point-grain equation is also sampled into tiny 2D sprites. On
+// browsers where WebGL2 is switched off, the sky still contains individual
+// luminous particles rather than a photograph or a blurry nebula backdrop.
+function originalGrainSprite(rgb: [number, number, number]) {
+  const sprite = document.createElement("canvas");
+  sprite.width = sprite.height = 40;
+  const g = sprite.getContext("2d")!;
+  const image = g.createImageData(40, 40);
+  for (let y = 0; y < 40; y++) for (let x = 0; x < 40; x++) {
+    const dx = (x + .5 - 20) / 20, dy = (y + .5 - 20) / 20;
+    const r2 = dx * dx + dy * dy;
+    if (r2 >= 1) continue;
+    const edgeX = clamp((Math.sqrt(r2) - .73) / .27, 0, 1);
+    const edge = 1 - edgeX * edgeX * (3 - 2 * edgeX);
+    const textureX = clamp((Math.sqrt(r2) - .82) / .18, 0, 1);
+    const textureEdge = 1 - textureX * textureX * (3 - 2 * textureX);
+    const tex = Math.min(1, (Math.exp(-r2 * 11.4) + .29 * Math.exp(-r2 * 4.4)) * textureEdge);
+    const alpha = (Math.exp(-r2 * 14) + Math.exp(-r2 * 3.1) * .19) * edge * tex * .90;
+    const index = (y * 40 + x) * 4;
+    image.data[index] = rgb[0]; image.data[index + 1] = rgb[1]; image.data[index + 2] = rgb[2];
+    image.data[index + 3] = Math.round(255 * clamp(alpha, 0, 1));
+  }
+  g.putImageData(image, 0, 0);
+  return sprite;
+}
+
+function startGrainCanvasFallback(canvas: HTMLCanvasElement, theme: Theme) {
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) return () => {};
+  const sprites = [
+    originalGrainSprite([221, 234, 255]),
+    originalGrainSprite([169, 207, 255]),
+    originalGrainSprite([255, 229, 197]),
+    originalGrainSprite([214, 190, 246]),
+  ];
+  const still = document.createElement("canvas");
+  const dots: { x: number; y: number; size: number; alpha: number; color: number; phase: number }[] = [];
+  const twinklers: typeof dots = [];
+  let frame = 0, lastFrame = 0, stopped = false;
+  const resize = () => {
+    const width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight);
+    const dpr = Math.min(window.devicePixelRatio || 1, width < 750 ? 1.3 : 1.5);
+    const resolution = Math.min(dpr, Math.sqrt((width < 750 ? 970000 : 1800000) / (width * height)));
+    still.width = canvas.width = Math.ceil(width * resolution);
+    still.height = canvas.height = Math.ceil(height * resolution);
+    const plate = still.getContext("2d", { alpha: true })!;
+    plate.clearRect(0, 0, still.width, still.height);
+    plate.globalCompositeOperation = "lighter";
+    dots.length = 0; twinklers.length = 0;
+    const { values, count } = makeStars(width, height);
+    for (let i = 0; i < count; i++) {
+      const n = i * 8;
+      const brightness = Math.min(1, .24 + values[n + 2] * .29);
+      const dot = {
+        x: values[n] * canvas.width, y: values[n + 1] * canvas.height,
+        size: (2.3 + values[n + 4] * .89) * resolution,
+        alpha: brightness * (theme === "dawn" ? .82 : 1),
+        color: values[n + 5] < .08 ? 1 : values[n + 5] > .975 ? 2 : values[n + 5] > .83 ? 3 : 0,
+        phase: values[n + 7] * 6.28,
+      };
+      dots.push(dot);
+      if (values[n + 2] > 1.03 && twinklers.length < 125) twinklers.push(dot);
+      plate.globalAlpha = dot.alpha;
+      plate.drawImage(sprites[dot.color], dot.x - dot.size / 2, dot.y - dot.size / 2, dot.size, dot.size);
+    }
+    plate.globalAlpha = 1;
+  };
+  const draw = (now: number) => {
+    if (stopped) return;
+    if (document.visibilityState !== "hidden" && now - lastFrame > 1000 / 24) {
+      lastFrame = now;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(still, 0, 0);
+      ctx.globalCompositeOperation = "lighter";
+      const time = now / 1000;
+      for (const dot of twinklers) {
+        ctx.globalAlpha = (.05 + .16 * (.5 + .5 * Math.sin(time * .65 + dot.phase))) * dot.alpha;
+        const size = dot.size * 1.25;
+        ctx.drawImage(sprites[dot.color], dot.x - size / 2, dot.y - size / 2, size, size);
+      }
+      ctx.globalAlpha = 1;
+    }
+    frame = requestAnimationFrame(draw);
+  };
+  resize();
+  const observer = new ResizeObserver(resize);
+  observer.observe(canvas);
+  frame = requestAnimationFrame(draw);
+  return () => { stopped = true; cancelAnimationFrame(frame); observer.disconnect(); };
+}
+
 export default function StellarParticles({ theme, canvasRef }: Props) {
   const internalRef = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
@@ -146,7 +238,7 @@ export default function StellarParticles({ theme, canvasRef }: Props) {
       premultipliedAlpha: false, preserveDrawingBuffer: true,
       powerPreference: "low-power",
     });
-    if (!gl) return; // The existing 2D background remains usable on older phones.
+    if (!gl) return startGrainCanvasFallback(canvas, theme);
     let program: WebGLProgram | null = null;
     let texture: WebGLTexture | null = null;
     let vao: WebGLVertexArrayObject | null = null;
