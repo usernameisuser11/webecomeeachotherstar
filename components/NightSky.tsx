@@ -41,33 +41,38 @@ function valueNoise(x: number, seed: number) {
 type RidgePoint = { x: number; height: number };
 type RidgeConfig = { base: number; roughness: number; seed: number; profile: RidgePoint[]; top: string; bottom: string; opacity?: number };
 const farRidge: RidgeConfig = {
-  base: .803, roughness: .020, seed: 4.9, top: "#27394e", bottom: "#0c1928", opacity: .90,
+  base: .846, roughness: .017, seed: 4.9, top: "#1b2a38", bottom: "#0a1825", opacity: .91,
   profile: [
-    { x: -.12, height: .026 }, { x: .00, height: .047 },
-    { x: .09, height: .064 }, { x: .17, height: .052 },
-    { x: .23, height: .083 }, { x: .29, height: .137 },
-    { x: .34, height: .101 }, { x: .41, height: .074 },
-    { x: .50, height: .092 }, { x: .57, height: .068 },
-    { x: .65, height: .093 }, { x: .72, height: .119 },
-    { x: .79, height: .085 }, { x: .88, height: .105 },
-    { x: .96, height: .073 }, { x: 1.12, height: .048 },
+    { x: -.12, height: .022 }, { x: .00, height: .037 },
+    { x: .075, height: .050 }, { x: .14, height: .045 },
+    { x: .19, height: .061 }, { x: .245, height: .074 },
+    { x: .28, height: .105 }, { x: .295, height: .109 },
+    { x: .325, height: .096 }, { x: .36, height: .071 },
+    { x: .44, height: .056 }, { x: .49, height: .070 },
+    { x: .555, height: .077 }, { x: .61, height: .058 },
+    { x: .675, height: .063 }, { x: .72, height: .087 },
+    { x: .758, height: .099 }, { x: .795, height: .077 },
+    { x: .85, height: .064 }, { x: .89, height: .075 },
+    { x: .95, height: .051 }, { x: 1.12, height: .039 },
   ],
 };
 const middleRidge: RidgeConfig = {
-  base: .860, roughness: .014, seed: 12.7, top: "#12263b", bottom: "#071322",
+  base: .897, roughness: .011, seed: 12.7, top: "#0c1b2b", bottom: "#06111d",
   profile: [
-    { x: -.12, height: .037 }, { x: .00, height: .076 },
-    { x: .06, height: .092 }, { x: .14, height: .058 },
-    { x: .22, height: .045 }, { x: .29, height: .062 },
-    { x: .38, height: .108 }, { x: .46, height: .073 },
-    { x: .53, height: .058 }, { x: .60, height: .081 },
-    { x: .69, height: .122 }, { x: .75, height: .090 },
-    { x: .84, height: .066 }, { x: .90, height: .084 },
-    { x: .97, height: .073 }, { x: 1.12, height: .047 },
+    { x: -.12, height: .031 }, { x: .00, height: .060 },
+    { x: .07, height: .070 }, { x: .12, height: .063 },
+    { x: .195, height: .034 }, { x: .23, height: .040 },
+    { x: .29, height: .052 }, { x: .355, height: .081 },
+    { x: .405, height: .090 }, { x: .44, height: .072 },
+    { x: .515, height: .048 }, { x: .57, height: .053 },
+    { x: .63, height: .075 }, { x: .695, height: .096 },
+    { x: .745, height: .073 }, { x: .79, height: .050 },
+    { x: .845, height: .054 }, { x: .90, height: .072 },
+    { x: .98, height: .055 }, { x: 1.12, height: .036 },
   ],
 };
 const shoreRidge: RidgeConfig = {
-  base: .920, roughness: .004, seed: 23.6, top: "#081725", bottom: "#01060f",
+  base: .941, roughness: .004, seed: 23.6, top: "#06121e", bottom: "#01060f",
   profile: [
     { x: -.12, height: .018 }, { x: .00, height: .026 },
     { x: .18, height: .018 }, { x: .31, height: .014 },
@@ -97,10 +102,11 @@ function mountainHeight(t: number, cfg: RidgeConfig, reliefScale = 1) {
     + (-2 * u3 + 3 * u2) * right.height
     + (u3 - u2) * m1;
   const weatheredEdge =
-    valueNoise(t * 5.1 + .3, cfg.seed) * .40 +
-    valueNoise(t * 14.3, cfg.seed + 2) * .33 +
-    valueNoise(t * 34.7, cfg.seed + 4) * .18 +
-    valueNoise(t * 79.1, cfg.seed + 6) * .09;
+    valueNoise(t * 5.1 + .3, cfg.seed) * .21 +
+    valueNoise(t * 14.3, cfg.seed + 2) * .27 +
+    valueNoise(t * 34.7, cfg.seed + 4) * .26 +
+    valueNoise(t * 79.1, cfg.seed + 6) * .17 +
+    valueNoise(t * 154.7, cfg.seed + 9) * .09;
   return cfg.base - (spine + weatheredEdge * cfg.roughness) * reliefScale;
 }
 
