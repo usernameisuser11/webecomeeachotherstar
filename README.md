@@ -18,10 +18,9 @@
 이 저장소는 별도의 Cloudflare 계정으로 이전 배포할 수 있도록 `wrangler.cloudflare.jsonc`를 포함합니다. **현재 ChatGPT Sites에서 실행 중인 D1과 사용자 Cloudflare 계정에 새로 만드는 D1은 서로 다른 데이터베이스**입니다. 새 DB에는 기존 별 기록이 자동으로 복사되지 않습니다.
 
 1. Cloudflare 계정으로 `npx wrangler login`을 실행합니다. GitHub Actions 배포를 사용할 경우 Cloudflare API 토큰과 계정 ID를 별도 저장소 비밀 변수로 구성해야 하며 코드에 넣지 않습니다.
-2. `npx wrangler d1 create webecomeeachotherstar-db`로 데이터베이스를 생성합니다.
-3. 출력된 D1 `database_id`를 `wrangler.cloudflare.jsonc`의 `00000000-0000-4000-8000-000000000000` 대신 입력합니다. `DB` 바인딩 이름은 바꾸지 않습니다.
-4. `npx wrangler d1 migrations apply webecomeeachotherstar-db --remote --config wrangler.cloudflare.jsonc`로 스키마를 적용합니다.
-5. `npm run build` 후 `npx wrangler deploy --config wrangler.cloudflare.jsonc`로 Workers와 정적 자산을 배포합니다.
+2. **D1은 이미 생성되었습니다.** `webecomeeachotherstar-db`의 ID `00907ab5-1365-42f8-9d3e-98009603b65d`는 `wrangler.cloudflare.jsonc`에 반영되어 있습니다. 같은 DB를 다시 만들지 마세요.
+3. `0000_fluffy_gunslinger.sql`, `0001_dazzling_shape.sql`의 테이블과 `d1_migrations` 기록도 2026-11-13에 원격 DB에 적용되었습니다. 이후 새로운 마이그레이션을 추가한 경우에만 `npx wrangler d1 migrations apply webecomeeachotherstar-db --remote --config wrangler.cloudflare.jsonc`를 실행하세요.
+4. `npm run build` 후 `npx wrangler deploy --config wrangler.cloudflare.jsonc`로 Workers와 정적 자산을 배포합니다.
 
 `wrangler.cloudflare.jsonc`는 **사용자 Cloudflare 계정용** 설정입니다. 기존 Sites 배포는 `.openai/hosting.json`과 사이트 전용 빌드 절차를 계속 사용하므로 서로를 덮어쓰지 않습니다. `--remote`가 붙은 D1 명령은 실제 원격 DB를 변경하므로 반드시 대상 DB 이름을 확인하고 실행하세요.
 
