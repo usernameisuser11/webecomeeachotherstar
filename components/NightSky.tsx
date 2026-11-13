@@ -41,7 +41,7 @@ function valueNoise(x: number, seed: number) {
 type RidgePoint = { x: number; height: number };
 type RidgeConfig = { base: number; roughness: number; seed: number; profile: RidgePoint[]; top: string; bottom: string; opacity?: number };
 const farRidge: RidgeConfig = {
-  base: .846, roughness: .017, seed: 4.9, top: "#1b2a38", bottom: "#0a1825", opacity: .91,
+  base: .846, roughness: .017, seed: 4.9, top: "#122534", bottom: "#071420",
   profile: [
     { x: -.12, height: .022 }, { x: .00, height: .037 },
     { x: .075, height: .050 }, { x: .14, height: .045 },
@@ -57,7 +57,7 @@ const farRidge: RidgeConfig = {
   ],
 };
 const middleRidge: RidgeConfig = {
-  base: .897, roughness: .011, seed: 12.7, top: "#0c1b2b", bottom: "#06111d",
+  base: .897, roughness: .011, seed: 12.7, top: "#091724", bottom: "#030b16",
   profile: [
     { x: -.12, height: .031 }, { x: .00, height: .060 },
     { x: .07, height: .070 }, { x: .12, height: .063 },
@@ -72,7 +72,7 @@ const middleRidge: RidgeConfig = {
   ],
 };
 const shoreRidge: RidgeConfig = {
-  base: .941, roughness: .004, seed: 23.6, top: "#06121e", bottom: "#01060f",
+  base: .941, roughness: .004, seed: 23.6, top: "#030d16", bottom: "#01050d",
   profile: [
     { x: -.12, height: .018 }, { x: .00, height: .026 },
     { x: .18, height: .018 }, { x: .31, height: .014 },
@@ -242,7 +242,7 @@ function milkyWayCenter(u: number) {
 function createBackdrop(w: number, h: number, theme: SkyTheme) {
   const palette = themePalettes[theme];
   const surface = document.createElement("canvas");
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.6);
+  const dpr = Math.min(window.devicePixelRatio || 1, w < 750 ? 1.85 : 1.7, Math.sqrt((w < 750 ? 1250000 : 2200000) / Math.max(1, w * h)));
   surface.width = Math.round(w * dpr);
   surface.height = Math.round(h * dpr);
   const g = surface.getContext("2d")!;
@@ -310,7 +310,7 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
 
 function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: RidgeConfig) {
   // Prevent portrait phones from turning a natural mountain into a steep spike.
-  const reliefScale = Math.min(1, w * 1.18 / h);
+  const reliefScale = Math.min(1, w * 1.18 / h) * (w / h < .78 ? .76 : 1);
   const heightAt = (x: number) => mountainHeight(x / w, config, reliefScale) * h;
   ctx.save();
   ctx.globalAlpha = config.opacity ?? 1;
@@ -337,19 +337,12 @@ function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: Ridg
   }
   ctx.restore();
 
-  ctx.save();
-  ctx.strokeStyle = `rgba(173,190,222,${config.seed < 6 ? .04 : .021})`;
-  ctx.lineWidth = .6;
-  ctx.beginPath();
-  for (let x = 0; x <= w + 4; x += 3) {
-    const y = heightAt(x);
-    if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.stroke(); ctx.restore();
+  // Real night-time ridgelines are defined by the darker mass against the
+  // luminous sky, not by a synthetic glowing stroke around every peak.
 }
 
 function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, theme: SkyTheme) {
-  const waterY = h * .835;
+  const waterY = h * (w / h < .78 ? .864 : .835);
   // Faint atmospheric haze just behind the distant mountain peaks.
   const mist = ctx.createLinearGradient(0, h * .68, 0, h * .89);
   mist.addColorStop(0, "rgba(114,137,166,0)");
@@ -448,7 +441,9 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     function resize() {
       if (!canvas || !ctx) return;
       w = canvas.clientWidth; h = canvas.clientHeight;
-      dpr = Math.min(window.devicePixelRatio || 1, w < 580 ? 1.3 : 1.7);
+      // The phone camera is farther back, yet its fine lines remain crisp.
+      // A backing-pixel budget keeps redraws affordable on older devices.
+      dpr = Math.min(window.devicePixelRatio || 1, w < 750 ? 1.85 : 1.7, Math.sqrt((w < 750 ? 1250000 : 2200000) / Math.max(1, w * h)));
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -577,10 +572,11 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
           beam.addColorStop(1, `rgba(143,195,246,${alpha})`);
           ctx.strokeStyle = beam; ctx.lineWidth = .9;
           ctx.beginPath(); ctx.moveTo(a.x*w, a.y*h); ctx.lineTo(b.x*w, b.y*h); ctx.stroke();
-          const keyPhase = key.charCodeAt(0) * .007;
-          const flow = (t * .09 + keyPhase) % 1;
-          const px = (a.x + (b.x - a.x) * flow) * w, py = (a.y + (b.y - a.y) * flow) * h;
-          halo(ctx, px, py, 7, "rgba(167,211,255,ALPHA)", alpha * 1.5);
+          // Even on a selected constellation, its stars and light nodes stay
+          // put: only the faint light at the midpoint gently scintillates.
+          const px = (a.x + b.x) * .5 * w, py = (a.y + b.y) * .5 * h;
+          const breath = .84 + .16 * Math.sin(t * .37 + key.charCodeAt(0) * .13);
+          halo(ctx, px, py, 5, "rgba(167,211,255,ALPHA)", alpha * breath);
         }
       }
 

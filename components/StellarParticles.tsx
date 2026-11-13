@@ -39,8 +39,8 @@ out vec3 vColor;out float vAlpha;out float vSeed;
 void main(){
   vec2 p=a0.xy;
   gl_Position=vec4(p.x*2.0-1.0,1.0-p.y*2.0,0.0,1.0);
-  float twinkle=.94+.042*sin(uTime*(.47+a0.w*.74)+a1.w*6.28318)
-                   +.023*sin(uTime*(.19+a1.z*.23)+a0.w*38.0);
+  float twinkle=.88+.087*sin(uTime*(.47+a0.w*.74)+a1.w*6.28318)
+                   +.033*sin(uTime*(.19+a1.z*.23)+a0.w*38.0);
   float pop=a1.y;
   vec3 cyan=vec3(.31,1.22,2.50),blue=vec3(.50,.75,2.54),violet=vec3(1.12,.66,2.30),gold=vec3(2.8,1.36,.48);
   vColor=pop<.38?mix(cyan,blue,pop/.38):mix(blue,violet,clamp((pop-.38)/.56,0.0,1.0));
@@ -172,19 +172,27 @@ function startGrainCanvasFallback(canvas: HTMLCanvasElement, theme: Theme) {
     originalGrainSprite([214, 190, 246]),
   ];
   const still = document.createElement("canvas");
-  const dots: { x: number; y: number; size: number; alpha: number; color: number; phase: number }[] = [];
-  const twinklers: typeof dots = [];
+  // Eight interleaved, pre-rendered point layers let every star scintillate
+  // while its coordinates remain fixed. Only 8 canvas composites per frame;
+  // no thousands-of-points redraws on older iPhones.
+  const layers = Array.from({ length: 8 }, () => document.createElement("canvas"));
   let frame = 0, lastFrame = 0, stopped = false;
   const resize = () => {
     const width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight);
-    const dpr = Math.min(window.devicePixelRatio || 1, width < 750 ? 1.3 : 1.5);
-    const resolution = Math.min(dpr, Math.sqrt((width < 750 ? 970000 : 1800000) / (width * height)));
+    const dpr = Math.min(window.devicePixelRatio || 1, width < 750 ? 1.85 : 1.6);
+    const resolution = Math.min(dpr, Math.sqrt((width < 750 ? 1250000 : 2000000) / (width * height)));
     still.width = canvas.width = Math.ceil(width * resolution);
     still.height = canvas.height = Math.ceil(height * resolution);
     const plate = still.getContext("2d", { alpha: true })!;
     plate.clearRect(0, 0, still.width, still.height);
     plate.globalCompositeOperation = "lighter";
-    dots.length = 0; twinklers.length = 0;
+    const painters = layers.map(layer => {
+      layer.width = canvas.width; layer.height = canvas.height;
+      const painter = layer.getContext("2d", { alpha: true })!;
+      painter.clearRect(0, 0, layer.width, layer.height);
+      painter.globalCompositeOperation = "lighter";
+      return painter;
+    });
     const { values, count } = makeStars(width, height);
     for (let i = 0; i < count; i++) {
       const n = i * 8;
@@ -194,28 +202,28 @@ function startGrainCanvasFallback(canvas: HTMLCanvasElement, theme: Theme) {
         size: (2.3 + values[n + 4] * .89) * resolution,
         alpha: brightness * (theme === "dawn" ? .82 : 1),
         color: values[n + 5] < .08 ? 1 : values[n + 5] > .975 ? 2 : values[n + 5] > .83 ? 3 : 0,
-        phase: values[n + 7] * 6.28,
       };
-      dots.push(dot);
-      if (values[n + 2] > 1.03 && twinklers.length < 125) twinklers.push(dot);
-      plate.globalAlpha = dot.alpha;
+      plate.globalAlpha = dot.alpha * .78;
       plate.drawImage(sprites[dot.color], dot.x - dot.size / 2, dot.y - dot.size / 2, dot.size, dot.size);
+      const painter = painters[(i * 7 + Math.floor(values[n + 7] * 23)) % painters.length];
+      painter.globalAlpha = dot.alpha * .28;
+      painter.drawImage(sprites[dot.color], dot.x - dot.size / 2, dot.y - dot.size / 2, dot.size, dot.size);
     }
     plate.globalAlpha = 1;
+    painters.forEach(painter => { painter.globalAlpha = 1; });
   };
   const draw = (now: number) => {
     if (stopped) return;
-    if (document.visibilityState !== "hidden" && now - lastFrame > 1000 / 24) {
+    if (document.visibilityState !== "hidden" && now - lastFrame > 1000 / 20) {
       lastFrame = now;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.globalCompositeOperation = "source-over";
       ctx.drawImage(still, 0, 0);
       ctx.globalCompositeOperation = "lighter";
       const time = now / 1000;
-      for (const dot of twinklers) {
-        ctx.globalAlpha = (.05 + .16 * (.5 + .5 * Math.sin(time * .65 + dot.phase))) * dot.alpha;
-        const size = dot.size * 1.25;
-        ctx.drawImage(sprites[dot.color], dot.x - size / 2, dot.y - size / 2, size, size);
+      for (let i = 0; i < layers.length; i++) {
+        ctx.globalAlpha = .35 + .65 * (.5 + .5 * Math.sin(time * (.29 + i * .052) + i * 2.419));
+        ctx.drawImage(layers[i], 0, 0);
       }
       ctx.globalAlpha = 1;
     }
@@ -248,8 +256,8 @@ export default function StellarParticles({ theme, canvasRef }: Props) {
     const resize = () => {
       if (!vao || !buffer) return;
       const width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight);
-      const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.3 : 1.5);
-      const maxPixels = isMobile ? 970000 : 1800000;
+      const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.85 : 1.6);
+      const maxPixels = isMobile ? 1250000 : 2000000;
       const scale = Math.min(1, Math.sqrt(maxPixels / (width * height * dpr * dpr)));
       canvas.width = Math.round(width * dpr * scale);
       canvas.height = Math.round(height * dpr * scale);
