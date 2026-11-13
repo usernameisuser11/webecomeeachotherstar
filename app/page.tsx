@@ -315,8 +315,7 @@ export default function Home() {
     </div>
 
     {intro && !placing && <section className="hero">
-      <div className="eyebrow"><span className="eyebrow-line" /> 상명또래상담 · 우리의 작은 우주 <span className="eyebrow-star">✦</span></div>
-      <h1>멀리 있어도,<br />우리는 <i>같은</i><br /><span className="hero-ending">하늘 아래에 있어요.</span></h1>
+      <h1>멀리 있어도,<br />우리는 <i>같은 하늘</i><br /><span className="hero-ending">아래에 있어요.</span></h1>
       <p className="intro-copy">서로 다른 하루를 보낸 우리가<br />밤이 되면 하나의 별자리가 되는 곳입니다.<br />당신의 작은 빛도 이곳에 남겨 주세요.</p>
       <div className="hero-buttons">
         <button className="primary-cta" onClick={startCreate}><Sparkles size={16} /> {myStarId ? "내 별 찾아가기" : "나의 별 남기기"} <ArrowUpRight size={15} /></button>

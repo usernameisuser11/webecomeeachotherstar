@@ -41,44 +41,17 @@ function valueNoise(x: number, seed: number) {
 type RidgePoint = { x: number; height: number };
 type RidgeConfig = { base: number; roughness: number; seed: number; profile: RidgePoint[]; top: string; bottom: string; opacity?: number };
 const farRidge: RidgeConfig = {
-  base: .846, roughness: .017, seed: 4.9, top: "#122534", bottom: "#071420",
+  // A single broad mountain chain: large massifs separated by long, shallow
+  // saddles. The previous three tiny ridges read as repeated triangular hills.
+  base: .866, roughness: .009, seed: 4.9, top: "#132837", bottom: "#06111d",
   profile: [
-    { x: -.12, height: .022 }, { x: .00, height: .037 },
-    { x: .075, height: .050 }, { x: .14, height: .045 },
-    { x: .19, height: .061 }, { x: .245, height: .074 },
-    { x: .28, height: .105 }, { x: .295, height: .109 },
-    { x: .325, height: .096 }, { x: .36, height: .071 },
-    { x: .44, height: .056 }, { x: .49, height: .070 },
-    { x: .555, height: .077 }, { x: .61, height: .058 },
-    { x: .675, height: .063 }, { x: .72, height: .087 },
-    { x: .758, height: .099 }, { x: .795, height: .077 },
-    { x: .85, height: .064 }, { x: .89, height: .075 },
-    { x: .95, height: .051 }, { x: 1.12, height: .039 },
-  ],
-};
-const middleRidge: RidgeConfig = {
-  base: .897, roughness: .011, seed: 12.7, top: "#091724", bottom: "#030b16",
-  profile: [
-    { x: -.12, height: .031 }, { x: .00, height: .060 },
-    { x: .07, height: .070 }, { x: .12, height: .063 },
-    { x: .195, height: .034 }, { x: .23, height: .040 },
-    { x: .29, height: .052 }, { x: .355, height: .081 },
-    { x: .405, height: .090 }, { x: .44, height: .072 },
-    { x: .515, height: .048 }, { x: .57, height: .053 },
-    { x: .63, height: .075 }, { x: .695, height: .096 },
-    { x: .745, height: .073 }, { x: .79, height: .050 },
-    { x: .845, height: .054 }, { x: .90, height: .072 },
-    { x: .98, height: .055 }, { x: 1.12, height: .036 },
-  ],
-};
-const shoreRidge: RidgeConfig = {
-  base: .941, roughness: .004, seed: 23.6, top: "#030d16", bottom: "#01050d",
-  profile: [
-    { x: -.12, height: .018 }, { x: .00, height: .026 },
-    { x: .18, height: .018 }, { x: .31, height: .014 },
-    { x: .47, height: .029 }, { x: .58, height: .022 },
-    { x: .73, height: .015 }, { x: .85, height: .028 },
-    { x: .93, height: .040 }, { x: 1.12, height: .020 },
+    { x: -.12, height: .055 }, { x: 0, height: .063 },
+    { x: .095, height: .082 }, { x: .22, height: .126 },
+    { x: .32, height: .151 }, { x: .405, height: .119 },
+    { x: .50, height: .071 }, { x: .61, height: .057 },
+    { x: .72, height: .096 }, { x: .815, height: .134 },
+    { x: .90, height: .103 }, { x: 1.01, height: .068 },
+    { x: 1.12, height: .052 },
   ],
 };
 
@@ -256,8 +229,9 @@ function createBackdrop(w: number, h: number, theme: SkyTheme) {
 }
 
 function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: RidgeConfig) {
-  // Prevent portrait phones from turning a natural mountain into a steep spike.
-  const reliefScale = Math.min(1, w * 1.18 / h) * (w / h < .78 ? .76 : 1);
+  // On a phone the mountain must keep its apparent vertical size, rather than
+  // being flattened by the portrait aspect ratio into a row of tiny bumps.
+  const reliefScale = w / h < .78 ? .88 : 1;
   const heightAt = (x: number) => mountainHeight(x / w, config, reliefScale) * h;
   ctx.save();
   ctx.globalAlpha = config.opacity ?? 1;
@@ -289,7 +263,7 @@ function ridge(ctx: CanvasRenderingContext2D, w: number, h: number, config: Ridg
 }
 
 function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, theme: SkyTheme) {
-  const waterY = h * (w / h < .78 ? .864 : .835);
+  const waterY = h * (w / h < .78 ? .876 : .855);
   // Faint atmospheric haze just behind the distant mountain peaks.
   const mist = ctx.createLinearGradient(0, h * .68, 0, h * .89);
   mist.addColorStop(0, "rgba(114,137,166,0)");
@@ -297,7 +271,6 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   mist.addColorStop(1, "rgba(29,57,88,0)");
   ctx.fillStyle = mist; ctx.fillRect(0, h * .67, w, h * .24);
   ridge(ctx, w, h, farRidge);
-  ridge(ctx, w, h, middleRidge);
 
   const lake = ctx.createLinearGradient(0, waterY, 0, h);
   const water = themePalettes[theme].water;
@@ -312,25 +285,17 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
     ctx.fillRect(x + Math.sin(t * .45 + i * 3) * 8, y, len, .65);
   }
 
-  // The foreground shore is nearly black; only a handful of distant trees
-  // should remain visible in low light, avoiding a row of black pixel specks.
-  ridge(ctx, w, h, shoreRidge);
-  const treeRand = rng(88112);
-  for (let i = 0; i < 58; i++) {
-    const x = treeRand() * w;
-    const d = treeRand();
-    const y = h * (.835 + d * .15);
-    const height = (2 + d * 13) * (w < 580 ? .65 : 1);
-    ctx.strokeStyle = `rgba(2,12,23,${.22 + d * .48})`;
-    ctx.lineWidth = .9 + d * 1.2;
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - height); ctx.stroke();
-    ctx.fillStyle = `rgba(2,13,25,${.24 + d * .45})`;
-    for (let j = 0; j < 4; j++) {
-      const yy = y - height * (.36 + j * .17);
-      const ww = height * (.39 - j * .07);
-      ctx.beginPath(); ctx.moveTo(x, yy - height * .23); ctx.lineTo(x - ww, yy + height * .20); ctx.lineTo(x + ww, yy + height * .20); ctx.closePath(); ctx.fill();
-    }
-  }
+  // One smooth, low shoreline grounds the luminous tree. No extra rows of
+  // miniature peaks or triangular silhouettes in front of the mountain.
+  ctx.beginPath();
+  ctx.moveTo(0, h * .893);
+  ctx.bezierCurveTo(w * .18, h * .888, w * .32, h * .899, w * .48, h * .891);
+  ctx.bezierCurveTo(w * .65, h * .882, w * .80, h * .894, w, h * .887);
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+  const shore = ctx.createLinearGradient(0, h * .87, 0, h);
+  shore.addColorStop(0, "#04101d");
+  shore.addColorStop(1, "#01050e");
+  ctx.fillStyle = shore; ctx.fill();
   const bottom = ctx.createLinearGradient(0, h * .91, 0, h);
   bottom.addColorStop(0, "rgba(1,5,14,0)"); bottom.addColorStop(1, "rgba(1,5,14,.9)");
   ctx.fillStyle = bottom; ctx.fillRect(0, h * .91, w, h * .09);

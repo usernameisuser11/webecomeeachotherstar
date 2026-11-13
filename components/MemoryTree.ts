@@ -5,7 +5,7 @@ export function drawMemoryTree(ctx: CanvasRenderingContext2D, w: number, h: numb
   const x = w * (portrait ? .58 : .55);
   // The portrait camera sits farther back: a smaller tree, slightly lower on
   // the horizon, leaves substantially more sky open for the constellation.
-  const groundY = h * (portrait ? .863 : .844);
+  const groundY = h * (portrait ? .888 : .885);
   const scale = Math.min(w * .00174, h * .00111) * (portrait ? 1.04 : 1.51);
   const luminance = Math.min(.65, .24 + Math.sqrt(stars + glows * .25) * .042);
   const leafCount = Math.min(460, 196 + stars * 9 + glows * 3);
