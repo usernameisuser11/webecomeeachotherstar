@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "webecomeeachotherstar-db",
-      "database_id": "00000000-0000-4000-8000-000000000000",
+      "database_id": "00907ab5-1365-42f8-9d3e-98009603b65d",
       "migrations_dir": "drizzle"
     }
   ]
