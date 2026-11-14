@@ -109,7 +109,10 @@ function originalQuasarGrainTexture(gl: WebGL2RenderingContext) {
 
 function makeStars(width: number, height: number) {
   const random = randomGenerator(193891);
-  const count = Math.min(10500, Math.max(1700, Math.round(width * height / (width < 600 ? 155 : 115))));
+  // A tall phone must reveal a sky as full as a desktop panorama. Match star
+  // density per visible sky pixel instead of thinning it by screen width.
+  // One WebGL draw call still renders the entire field in parallel on the GPU.
+  const count = Math.min(10500, Math.max(1700, Math.round(width * height / 115)));
   const values = new Float32Array(count * 8);
   for (let i = 0; i < count; i++) {
     const k = i * 8;
@@ -126,7 +129,7 @@ function makeStars(width: number, height: number) {
     const color = random();
     values[k] = x;
     values[k + 1] = clamp(y, .015, .805);
-    values[k + 2] = .25 + magnitude * 2.35;
+    values[k + 2] = .27 + magnitude * 2.45;
     values[k + 3] = random();
     values[k + 4] = size;
     values[k + 5] = color < .025 ? .98 + random() * .019 : color;
@@ -256,8 +259,8 @@ export default function StellarParticles({ theme, canvasRef }: Props) {
     const resize = () => {
       if (!vao || !buffer) return;
       const width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight);
-      const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.85 : 1.6);
-      const maxPixels = isMobile ? 1250000 : 2000000;
+      const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 2.1 : 1.6);
+      const maxPixels = isMobile ? 1450000 : 2000000;
       const scale = Math.min(1, Math.sqrt(maxPixels / (width * height * dpr * dpr)));
       canvas.width = Math.round(width * dpr * scale);
       canvas.height = Math.round(height * dpr * scale);

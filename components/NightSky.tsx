@@ -58,21 +58,6 @@ const farRidge: RidgeConfig = {
     { x: .95, height: .051 }, { x: 1.12, height: .039 },
   ],
 };
-const middleRidge: RidgeConfig = {
-  base: .897, roughness: .011, seed: 12.7, top: "#091724", bottom: "#030b16",
-  profile: [
-    { x: -.12, height: .031 }, { x: .00, height: .060 },
-    { x: .07, height: .070 }, { x: .12, height: .063 },
-    { x: .195, height: .034 }, { x: .23, height: .040 },
-    { x: .29, height: .052 }, { x: .355, height: .081 },
-    { x: .405, height: .090 }, { x: .44, height: .072 },
-    { x: .515, height: .048 }, { x: .57, height: .053 },
-    { x: .63, height: .075 }, { x: .695, height: .096 },
-    { x: .745, height: .073 }, { x: .79, height: .050 },
-    { x: .845, height: .054 }, { x: .90, height: .072 },
-    { x: .98, height: .055 }, { x: 1.12, height: .036 },
-  ],
-};
 const shoreRidge: RidgeConfig = {
   base: .941, roughness: .004, seed: 23.6, top: "#030d16", bottom: "#01050d",
   profile: [
@@ -379,7 +364,6 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   mist.addColorStop(1, "rgba(29,57,88,0)");
   ctx.fillStyle = mist; ctx.fillRect(0, h * .67, w, h * .24);
   ridge(ctx, w, h, farRidge);
-  ridge(ctx, w, h, middleRidge);
 
   const lake = ctx.createLinearGradient(0, waterY, 0, h);
   const water = themePalettes[theme].water;
