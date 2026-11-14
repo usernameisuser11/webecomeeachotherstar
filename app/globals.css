@@ -88,6 +88,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 .star-card-moderation { display:flex; gap:14px; margin-top:14px; flex-wrap:wrap; }
 .quiet-report { display:inline-flex; align-items:center; gap:5px; padding:6px 0; color:#91aabd; background:none; border:0; font-size:11px; }
 .quiet-report:hover { color:#d1e8e9; }
+.star-link-action { border:1px solid rgba(171,222,230,.32); border-radius:7px; background:rgba(119,188,196,.09); padding:7px 9px; color:#c8eae9; }
 .star-report-form { display:grid; gap:9px; border-top:1px solid rgba(198,220,231,.17); padding-top:12px; margin-top:8px; }
 .star-report-form label { color:#bdd1dc; font-size:11px; }
 .star-report-form select { width:100%; padding:9px 10px; background:#152b3b; color:#eef5f7; border:1px solid #5f7b8e; border-radius:5px; font-size:12px; }

@@ -31,6 +31,7 @@ export const rooms = sqliteTable("rooms", {
   visibility: text("visibility").notNull(),
   theme: text("theme").notNull().default("forest"),
   inviteHash: text("invite_hash"),
+  linkTargetId: text("link_target_id"),
   createdAt: integer("created_at").notNull(),
 }, (t) => ({ ownerIdx: index("rooms_owner_hash_idx").on(t.ownerHash) }));
 

@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Camera, Check, CircleHelp, Flag, Heart, Link2, Plus, ShieldCheck, Sparkles, Tags, Trash2, Volume2, VolumeX, Waypoints, X } from "lucide-react";
-import NightSky, { type Glow, type Star } from "../components/NightSky";
+import NightSky, { type Glow, type SpecialLink, type Star } from "../components/NightSky";
 import StellarParticles from "../components/StellarParticles";
 
-type SkyState = { stars: Star[]; glows: Glow[]; liveStarIds: string[] };
+type SkyState = { stars: Star[]; glows: Glow[]; liveStarIds: string[]; specialLink: SpecialLink | null };
 type SkyTheme = "forest" | "violet" | "ocean" | "dawn";
 type Room = { id: string; name: string; visibility: "public" | "private"; theme: SkyTheme; createdAt: number };
 type ActiveRoom = Room & { inviteKey?: string };
@@ -46,7 +46,7 @@ const storageKey = (base: string, roomId?: string) => roomId ? `${base}:${roomId
 const privateWish = (roomId?: string) => { try { return localStorage.getItem(storageKey("our-sky-private-wish-v1", roomId)) || ""; } catch { return ""; } };
 
 export default function Home() {
-  const [sky, setSky] = useState<SkyState>({ stars: [], glows: [], liveStarIds: [] });
+  const [sky, setSky] = useState<SkyState>({ stars: [], glows: [], liveStarIds: [], specialLink: null });
   const [skyCapacity, setSkyCapacity] = useState(500);
   const [token, setToken] = useState("");
   const [myStarId, setMyStarId] = useState<string | null>(null);
@@ -120,7 +120,7 @@ export default function Home() {
   const switchRoom = useCallback((room: ActiveRoom | null) => {
     roomRef.current = room;
     setActiveRoom(room);
-    setSky({ stars: [], glows: [], liveStarIds: [] });
+    setSky({ stars: [], glows: [], liveStarIds: [], specialLink: null });
     setSelectedId(null); setPlacing(false); setShowCreate(false); setRoomPanel(null);
     setReportingId(null);
     setIntro(false);
@@ -253,7 +253,7 @@ export default function Home() {
     try {
       const data = await api(undefined, requestedRoom);
       if (requestedRoom?.id !== roomRef.current?.id) return;
-      setSky({ stars: data.stars || [], glows: data.glows || [], liveStarIds: data.liveStarIds || [] });
+      setSky({ stars: data.stars || [], glows: data.glows || [], liveStarIds: data.liveStarIds || [], specialLink: data.specialLink || null });
       setSkyCapacity(data.capacity || 500);
       if (myStarRef.current && Array.isArray(data.stars) && !data.stars.some((s: Star) => s.id === myStarRef.current)) {
         myStarRef.current = null;
@@ -330,6 +330,18 @@ export default function Home() {
     finally { setBusy(false); }
   };
 
+  const changeLink = async () => {
+    if (!activeRoom || !ownsCurrentRoom || !myStar || !selected || busy) return;
+    const unlink = !!sky.specialLink && (selected.id === myStar.id || selected.id === sky.specialLink.toStarId);
+    setBusy(true);
+    try {
+      await api({ action: unlink ? "clear-link" : "set-link", token: tokenRef.current, ...(unlink ? {} : { targetId: selected.id }) }, roomRef.current);
+      await refresh();
+      setToast(unlink ? "별을 잇던 선을 조용히 거두었습니다." : "두 별을 잇는 하나의 빛이 남았습니다.");
+    } catch (error) { setToast(error instanceof Error ? error.message : "연결선을 바꾸지 못했습니다."); }
+    finally { setBusy(false); }
+  };
+
   const sendReport = async () => {
     if (!selected || busy || !tokenRef.current) return;
     setBusy(true);
@@ -396,7 +408,7 @@ export default function Home() {
   useEffect(() => () => { audioRef.current?.close().catch(() => {}); }, []);
 
   return <main className="observatory">
-    <NightSky stars={sky.stars} glows={sky.glows} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} meteorCanvasRef={meteorCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
+    <NightSky stars={sky.stars} glows={sky.glows} specialLink={sky.specialLink} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} meteorCanvasRef={meteorCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
     <StellarParticles theme={activeRoom?.theme || "forest"} canvasRef={particleCanvas} />
     <div className="film-grain" aria-hidden="true" /><div className="top-vignette" aria-hidden="true" />
     <header className="topbar">
@@ -458,6 +470,7 @@ export default function Home() {
       <h2>{selected.name}</h2>
       {selected.id === myStarId ? <><p>이 하늘에 직접 남기신 별입니다.</p>{privateWish(activeRoom?.id) && <div className="private-wish"><span>나에게만 보이는 소원</span><p>{privateWish(activeRoom?.id)}</p></div>}</> : <><p>서로 다른 곳에서 같은 밤을 바라보고 있는 누군가의 별입니다.</p><button className="glow-button" disabled={busy} onClick={sendGlow}><Heart size={15} /> 작은 빛 보내기 <ArrowUpRight size={14} /></button></>}
       <div className="star-card-moderation">
+        {ownsCurrentRoom && myStar && (selected.id !== myStarId || sky.specialLink) && <button className="quiet-report star-link-action" disabled={busy} onClick={changeLink}><Link2 size={13} /> {sky.specialLink && (selected.id === myStarId || selected.id === sky.specialLink.toStarId) ? "연결 해제" : sky.specialLink ? "이 별로 연결 변경" : "이 별과 연결"}</button>}
         {selected.id !== myStarId && <button className="quiet-report" onClick={() => setReportingId(current => current === selected.id ? null : selected.id)}><Flag size={13} /> 신고하기</button>}
         {(selected.id === myStarId || ownsCurrentRoom) && <button className="quiet-report" disabled={busy} onClick={deleteStar}><Trash2 size={13} /> {selected.id === myStarId ? "내 별 삭제" : "방장 권한으로 삭제"}</button>}
       </div>
@@ -545,6 +558,7 @@ export default function Home() {
         <div className="guide-row"><span>03</span><p>같은 시간에 바라보는 별은 조금 더 밝게 빛납니다. 채팅하지 않아도 괜찮습니다.</p></div>
         <div className="guide-row"><span>04</span><p>소원은 본인 기기에만 저장됩니다. 별 이름은 모두에게 보입니다.</p></div>
         <div className="guide-row"><span>05</span><p>다른 분의 별에 욕설·괴롭힘·광고가 있다면 별을 선택해 신고해 주세요. 신고 내용은 공개되지 않으며, 방장은 자신의 방에서 신고 내역을 확인할 수 있습니다.</p></div>
+        <div className="guide-row"><span>06</span><p>방장은 자신의 별과 다른 별 하나를 이어 특별한 연결선을 남길 수 있습니다. 다른 별을 선택하면 연결하거나 바꿀 수 있습니다.</p></div>
         <p className="guide-outro">모두의 마음이 같은 속도로 움직일 필요는 없습니다.<br />이곳에서는 그저 함께 빛나 주세요.</p>
         <button className="dialog-main" onClick={() => setShowGuide(false)}>밤하늘로 돌아가기 <ArrowUpRight size={17} /></button>
       </section>

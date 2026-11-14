@@ -21,17 +21,39 @@ export async function POST(request: Request) {
     const now = Date.now();
     if (body.action === "view") {
       const [allStars, recentGlows, active] = await Promise.all([
-        db.select({ id: roomStars.id, name: roomStars.name, x: roomStars.x, y: roomStars.y, hue: roomStars.hue, createdAt: roomStars.createdAt }).from(roomStars).where(eq(roomStars.roomId, room.id)).orderBy(roomStars.createdAt).limit(ROOM_SKY_CAPACITY),
+        db.select({ id: roomStars.id, ownerHash: roomStars.ownerHash, name: roomStars.name, x: roomStars.x, y: roomStars.y, hue: roomStars.hue, createdAt: roomStars.createdAt }).from(roomStars).where(eq(roomStars.roomId, room.id)).orderBy(roomStars.createdAt).limit(ROOM_SKY_CAPACITY),
         db.select({ toStarId: roomGlows.toStarId, createdAt: roomGlows.createdAt }).from(roomGlows).where(and(eq(roomGlows.roomId, room.id), gte(roomGlows.createdAt, now - 30 * 86400000))).orderBy(desc(roomGlows.createdAt)).limit(2000),
         db.select({ ownerHash: roomPresence.ownerHash }).from(roomPresence).where(and(eq(roomPresence.roomId, room.id), gte(roomPresence.lastSeen, now - 48000))).limit(200),
       ]);
       const activeHashes = active.map(row => row.ownerHash);
       const liveStars = activeHashes.length ? await db.select({ id: roomStars.id }).from(roomStars).where(and(eq(roomStars.roomId, room.id), inArray(roomStars.ownerHash, activeHashes))) : [];
-      return Response.json({ room: roomInfo, stars: allStars, capacity: ROOM_SKY_CAPACITY, glows: recentGlows, liveStarIds: liveStars.map(s => s.id), now }, { headers: noCache });
+      const ownerStarId = allStars.find(star => star.ownerHash === room.ownerHash)?.id;
+      const specialLink = ownerStarId && allStars.some(star => star.id === room.linkTargetId)
+        ? { fromStarId: ownerStarId, toStarId: room.linkTargetId } : null;
+      // Never expose the per-device hashes used to enforce star ownership.
+      const publicStars = allStars.map(star => ({ id: star.id, name: star.name, x: star.x, y: star.y, hue: star.hue, createdAt: star.createdAt }));
+      return Response.json({ room: roomInfo, stars: publicStars, specialLink, capacity: ROOM_SKY_CAPACITY, glows: recentGlows, liveStarIds: liveStars.map(s => s.id), now }, { headers: noCache });
     }
     const hash = await hashSecret(body.token);
     if (!hash) return fail("별을 찾는 데 필요한 정보가 없습니다.");
     const ownStar = () => db.select({ id: roomStars.id }).from(roomStars).where(and(eq(roomStars.roomId, room.id), eq(roomStars.ownerHash, hash))).limit(1);
+    if (body.action === "set-link" || body.action === "clear-link") {
+      if (room.ownerHash !== hash) return fail("방장만 특별한 연결선을 관리할 수 있습니다.", 403);
+      if (body.action === "clear-link") {
+        await db.update(rooms).set({ linkTargetId: null }).where(and(eq(rooms.id, room.id), eq(rooms.ownerHash, hash)));
+        return Response.json({ ok: true }, { headers: noCache });
+      }
+      if (!validRoomId(body.targetId)) return fail("연결할 별을 선택해 주세요.");
+      const [mine, target] = await Promise.all([
+        ownStar(),
+        db.select({ id: roomStars.id, ownerHash: roomStars.ownerHash }).from(roomStars).where(and(eq(roomStars.roomId, room.id), eq(roomStars.id, body.targetId))).limit(1),
+      ]);
+      if (!mine.length) return fail("방장의 별을 먼저 남겨 주세요.");
+      if (!target.length || target[0].ownerHash === hash) return fail("다른 친구의 별을 골라 주세요.");
+      // One nullable field per room: a new choice replaces the previous link.
+      await db.update(rooms).set({ linkTargetId: target[0].id }).where(and(eq(rooms.id, room.id), eq(rooms.ownerHash, hash)));
+      return Response.json({ ok: true }, { headers: noCache });
+    }
     if (body.action === "create") {
       const existing = await ownStar();
       if (existing.length) return Response.json({ id: existing[0].id, alreadyCreated: true }, { headers: noCache });
@@ -68,6 +90,8 @@ export async function POST(request: Request) {
         db.delete(roomGlows).where(eq(roomGlows.toStarId, target.id)),
         db.delete(roomPresence).where(and(eq(roomPresence.roomId, room.id), eq(roomPresence.ownerHash, target.ownerHash))),
         db.delete(reports).where(and(eq(reports.targetType, "star"), eq(reports.targetId, target.id))),
+        ...(room.linkTargetId === target.id || target.ownerHash === room.ownerHash
+          ? [db.update(rooms).set({ linkTargetId: null }).where(eq(rooms.id, room.id))] : []),
         db.delete(roomStars).where(and(eq(roomStars.id, target.id), eq(roomStars.roomId, room.id))),
       ]);
       return Response.json({ ok: true }, { headers: noCache });

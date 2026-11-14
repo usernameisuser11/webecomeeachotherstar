@@ -5,11 +5,13 @@ import { drawMemoryTree } from "./MemoryTree";
 
 export type Star = { id: string; name: string; x: number; y: number; hue: number; createdAt: number };
 export type Glow = { toStarId: string; createdAt: number };
+export type SpecialLink = { fromStarId: string; toStarId: string };
 type SkyTheme = "forest" | "violet" | "ocean" | "dawn";
 
 type Props = {
   stars: Star[];
   glows: Glow[];
+  specialLink: SpecialLink | null;
   liveStarIds: string[];
   myStarId: string | null;
   selectedId: string | null;
@@ -148,13 +150,13 @@ function createAmbientLayers(w: number, h: number, dpr: number) {
   return layers;
 }
 
-// Build small, open star-chart figures rather than a geometric network. In
-// particular, do not close polygons or draw every diagonal between nearby
-// stars: those shapes look like an exercise in counting diagonals, not a sky.
-// This is precomputed when the room's stars/viewport change, not per frame.
+// Each new star may attach to one older nearby star. Existing connections
+// never rearrange just because someone else leaves a new star in the room.
+// This avoids closed polygons and the disappearing-line problem.
 function constellationLinks(stars: Star[], w: number, h: number): ConstellationLink[] {
   const links: ConstellationLink[] = [];
-  const count = stars.length;
+  const ordered = [...stars].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  const count = ordered.length;
   if (count < 2) return links;
   const parent = Array.from({ length: count }, (_, i) => i);
   const sizes = new Array<number>(count).fill(1);
@@ -163,39 +165,38 @@ function constellationLinks(stars: Star[], w: number, h: number): ConstellationL
     while (parent[index] !== index) { parent[index] = parent[parent[index]]; index = parent[index]; }
     return index;
   };
-  const px = stars.map(s => s.x * w), py = stars.map(s => s.y * h);
-  const maxLength = Math.min(w, h) * (count < 5 ? .58 : count < 14 ? .43 : .32);
+  const px = ordered.map(s => s.x * w), py = ordered.map(s => s.y * h);
+  const maxLength = Math.min(w, h) * .58;
   const minLengthSq = 14 * 14;
-  const candidates: { i: number; j: number; d2: number }[] = [];
-  for (let i = 0; i < count; i++) {
-    for (let j = i + 1; j < count; j++) {
-      const dx = px[i] - px[j], dy = py[i] - py[j];
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= minLengthSq && d2 <= maxLength * maxLength) candidates.push({ i, j, d2 });
-    }
-  }
-  candidates.sort((a, b) => a.d2 - b.d2);
   const chosen: { i: number; j: number }[] = [];
   const orientation = (a: number, b: number, c: number) =>
     (px[b] - px[a]) * (py[c] - py[a]) - (py[b] - py[a]) * (px[c] - px[a]);
-  for (const { i, j, d2 } of candidates) {
-    // Maximum two links per star, no closed polygons, and small groups of up
-    // to six stars. An isolated star can stay isolated until neighbours arrive.
-    const a = find(i), b = find(j);
-    if (a === b || degree[i] >= 2 || degree[j] >= 2 || sizes[a] + sizes[b] > 6) continue;
-    const crosses = chosen.some(edge => {
-      if (edge.i === i || edge.j === i || edge.i === j || edge.j === j) return false;
-      const p = orientation(i, j, edge.i), q = orientation(i, j, edge.j);
-      const r = orientation(edge.i, edge.j, i), s = orientation(edge.i, edge.j, j);
-      return p * q < 0 && r * s < 0;
-    });
-    if (crosses) continue;
-    parent[b] = a;
-    sizes[a] += sizes[b];
-    degree[i]++; degree[j]++;
-    chosen.push({ i, j });
-    const first = stars[i], second = stars[j];
-    links.push({ a: first, b: second, distance: Math.sqrt(d2), key: `${first.id}:${second.id}` });
+  for (let i = 1; i < count; i++) {
+    const candidates: { j: number; d2: number }[] = [];
+    for (let j = 0; j < i; j++) {
+      if (degree[j] >= 2 || sizes[find(j)] >= 6) continue;
+      const dx = px[i] - px[j], dy = py[i] - py[j];
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= minLengthSq && d2 <= maxLength * maxLength) candidates.push({ j, d2 });
+    }
+    candidates.sort((a, b) => a.d2 - b.d2);
+    for (const { j, d2 } of candidates) {
+      const crosses = chosen.some(edge => {
+        if (edge.i === j || edge.j === j) return false;
+        const p = orientation(i, j, edge.i), q = orientation(i, j, edge.j);
+        const r = orientation(edge.i, edge.j, i), s = orientation(edge.i, edge.j, j);
+        return p * q < 0 && r * s < 0;
+      });
+      if (crosses) continue;
+      const root = find(j);
+      parent[i] = root;
+      sizes[root]++;
+      degree[i]++; degree[j]++;
+      chosen.push({ i, j });
+      const a = ordered[j], b = ordered[i];
+      links.push({ a, b, distance: Math.sqrt(d2), key: `${a.id}:${b.id}` });
+      break;
+    }
   }
   return links;
 }
@@ -434,18 +435,20 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   ctx.fillStyle = bottom; ctx.fillRect(0, h * .91, w, h * .09);
 }
 
-export default function NightSky({ stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, theme, canvasRef, meteorCanvasRef, onSpot, onSelectStar }: Props) {
-  const refs = useRef({ stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar });
-  useEffect(() => { refs.current = { stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar }; }, [stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar]);
+export default function NightSky({ stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, theme, canvasRef, meteorCanvasRef, onSpot, onSelectStar }: Props) {
+  const refs = useRef({ stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar });
+  useEffect(() => { refs.current = { stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar }; }, [stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar]);
   const local = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const labelHits = useRef<{ id: string; x: number; y: number; width: number; height: number }[]>([]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d", { alpha: false });
-    const meteorCanvas = meteorCanvasRef.current;
-    const meteorCtx = meteorCanvas?.getContext("2d", { alpha: true });
-    if (!ctx || !meteorCanvas || !meteorCtx) return;
+    const meteorElement = meteorCanvasRef.current;
+    const meteorPainter = meteorElement?.getContext("2d", { alpha: true });
+    if (!ctx || !meteorElement || !meteorPainter) return;
+    const meteorCanvas = meteorElement;
+    const meteorCtx = meteorPainter;
     let destroyed = false, frame = 0, meteorFrame = 0;
     let backdrop: HTMLCanvasElement | null = null;
     let terrainLayer: HTMLCanvasElement | null = null;
@@ -705,6 +708,19 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       ctx.save(); ctx.globalCompositeOperation = "screen";
       if (refs.current.showConstellations) {
         if (constellationLayer) ctx.drawImage(constellationLayer, 0, 0, w, h);
+        const special = refs.current.specialLink;
+        if (special) {
+          const a = people.find(star => star.id === special.fromStarId);
+          const b = people.find(star => star.id === special.toStarId);
+          if (a && b) {
+            ctx.strokeStyle = "rgba(178,226,239,.74)";
+            ctx.lineWidth = w < 750 ? 1.3 : 1.45;
+            ctx.shadowColor = "rgba(128,210,227,.34)";
+            ctx.shadowBlur = 5;
+            ctx.beginPath(); ctx.moveTo(a.x * w, a.y * h); ctx.lineTo(b.x * w, b.y * h); ctx.stroke();
+            ctx.shadowBlur = 0;
+          }
+        }
         // Only the selected star's existing straight connections become a
         // little brighter. Everything else stays in a cached, calm layer.
         if (selected) for (const { a, b, distance } of cachedLinks) {

@@ -1,0 +1,1 @@
+ALTER TABLE `rooms` ADD `link_target_id` text;
