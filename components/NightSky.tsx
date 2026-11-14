@@ -136,6 +136,27 @@ function makeAmbientStars(w: number, h: number): AmbientStar[] {
   return stars;
 }
 
+// Star positions never change. Group the fine 2D backdrop points into a few
+// cached plates rather than redrawing >1,000 rectangles and circles per frame.
+// The foreground WebGL starfield still scintillates independently on the GPU.
+function createAmbientLayers(w: number, h: number, dpr: number) {
+  const layers = Array.from({ length: 4 }, () => document.createElement("canvas"));
+  const painters = layers.map(layer => {
+    layer.width = Math.max(1, Math.round(w * dpr));
+    layer.height = Math.max(1, Math.round(h * dpr));
+    const painter = layer.getContext("2d")!;
+    painter.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return painter;
+  });
+  makeAmbientStars(w, h).forEach((star, i) => {
+    const painter = painters[(i * 7 + Math.floor(star.phase * 1.73)) % painters.length];
+    painter.fillStyle = `rgba(${star.tint},${star.alpha})`;
+    if (star.radius < .72) painter.fillRect(star.x, star.y, Math.max(.55, star.radius * 1.4), Math.max(.55, star.radius * 1.4));
+    else { painter.beginPath(); painter.arc(star.x, star.y, star.radius, 0, TAU); painter.fill(); }
+  });
+  return layers;
+}
+
 // Star positions change only when the sky is refreshed. Work out the nearest
 // neighbours once instead of sorting all stars inside every animation frame.
 function constellationLinks(stars: Star[], w: number, h: number): ConstellationLink[] {
@@ -411,7 +432,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     let treeLayer: HTMLCanvasElement | null = null;
     let treeCtx: CanvasRenderingContext2D | null = null;
     let lastTreePaint = -Infinity;
-    let ambientStars: AmbientStar[] = [];
+    let ambientLayers: HTMLCanvasElement[] = [];
     let w = 0, h = 0, dpr = 1;
     const timeZero = performance.now();
     const meteors: Meteor[] = [];
@@ -435,6 +456,12 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     let cachedGlowCounts = new Map<string, number>();
     let cachedPresence = new Set<string>();
     let cachedLinks: ConstellationLink[] = [];
+    let sharedStarLayers: HTMLCanvasElement[] = [];
+    let layerPeople: Star[] | null = null;
+    let layerGlows: Glow[] | null = null;
+    let layerPresence: string[] | null = null;
+    let layerOwner: string | null = null;
+    let layerSelected: string | null = null;
     let constellationLayer: HTMLCanvasElement | null = null;
     let labelLayer: HTMLCanvasElement | null = null;
     let labelCacheKey = "";
@@ -502,6 +529,32 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       labelLayer = layer;
     }
 
+    function prepareSharedStars(people: Star[], myId: string | null, selected: string | null) {
+      // A sky with hundreds of memories would otherwise ask Canvas2D to
+      // draw hundreds of independent sprites every frame. Large skies use
+      // three gently phase-shifted plates; focused stars stay fully dynamic.
+      if (people.length <= 36) { sharedStarLayers = []; return; }
+      const layers = sharedStarLayers.length === 3 ? sharedStarLayers : Array.from({ length: 3 }, () => document.createElement("canvas"));
+      const painters = layers.map(layer => {
+        const width = Math.max(1, Math.round(w * dpr));
+        const height = Math.max(1, Math.round(h * dpr));
+        if (layer.width !== width || layer.height !== height) { layer.width = width; layer.height = height; }
+        const painter = layer.getContext("2d")!;
+        painter.setTransform(dpr, 0, 0, dpr, 0, 0);
+        painter.clearRect(0, 0, w, h);
+        return painter;
+      });
+      for (let i = 0; i < people.length; i++) {
+        const s = people[i];
+        if (s.id === myId || s.id === selected) continue;
+        const painter = painters[(i * 7) % painters.length];
+        painter.globalAlpha = clamp(.89 * (1 + Math.min(5, cachedGlowCounts.get(s.id) ?? 0) * .035) * (cachedPresence.has(s.id) ? 1.06 : 1), 0, 1);
+        painter.drawImage(starSprite(s.hue, false), s.x * w - 27, s.y * h - 27);
+      }
+      painters.forEach(painter => { painter.globalAlpha = 1; });
+      sharedStarLayers = layers;
+    }
+
     function resize() {
       if (!canvas || !ctx) return;
       w = canvas.clientWidth; h = canvas.clientHeight;
@@ -524,8 +577,9 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       treeCtx = treeLayer.getContext("2d", { alpha: true });
       treeCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
       lastTreePaint = -Infinity;
-      ambientStars = makeAmbientStars(w, h);
+      ambientLayers = createAmbientLayers(w, h, dpr);
       drawnSky = null;
+      layerPeople = null;
       labelCacheKey = "";
       labeledSky = null;
     }
@@ -562,18 +616,13 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       ctx.clearRect(0, 0, w, h);
       if (backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
 
-      // Slow scintillation, with a nearly constant baseline. Stars should not
-      // pulse in unison or flash like a UI particle effect.
+      // Batched static point plates replace thousands of per-frame draws.
+      // Different phase groups breathe only slightly; the independent WebGL
+      // points above remain the main source of true individual scintillation.
       ctx.save(); ctx.globalCompositeOperation = "screen";
-      for (const star of ambientStars) {
-        const breath = clamp(.88 + .12 * Math.sin(t * star.speed + star.phase) + .048 * Math.sin(t * star.speed * 1.7 + star.phase * 1.9), .68, 1.07);
-        const alpha = star.alpha * breath;
-        ctx.fillStyle = `rgba(${star.tint},${alpha})`;
-        if (star.radius < .72) {
-          ctx.fillRect(star.x, star.y, Math.max(.55, star.radius * 1.4), Math.max(.55, star.radius * 1.4));
-        } else {
-          ctx.beginPath(); ctx.arc(star.x, star.y, star.radius, 0, TAU); ctx.fill();
-        }
+      for (let i = 0; i < ambientLayers.length; i++) {
+        ctx.globalAlpha = .87 + .13 * Math.sin(t * (.27 + i * .08) + i * 2.37);
+        ctx.drawImage(ambientLayers[i], 0, 0, w, h);
       }
       ctx.restore();
 
@@ -648,6 +697,14 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         for (const g of lights) cachedGlowCounts.set(g.toStarId, (cachedGlowCounts.get(g.toStarId) ?? 0) + 1);
       }
       if (drawnPresence !== live) { drawnPresence = live; cachedPresence = new Set(live); }
+      if (layerPeople !== people || layerGlows !== lights || layerPresence !== live || layerOwner !== myId || layerSelected !== selected) {
+        prepareSharedStars(people, myId, selected);
+        layerPeople = people;
+        layerGlows = lights;
+        layerPresence = live;
+        layerOwner = myId;
+        layerSelected = selected;
+      }
       ctx.save(); ctx.globalCompositeOperation = "screen";
       if (refs.current.showConstellations) {
         if (constellationLayer) ctx.drawImage(constellationLayer, 0, 0, w, h);
@@ -662,9 +719,15 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         }
       }
 
+      for (let i = 0; i < sharedStarLayers.length; i++) {
+        ctx.globalAlpha = .91 + .09 * Math.sin(t * (.32 + i * .11) + i * 2.37);
+        ctx.drawImage(sharedStarLayers[i], 0, 0, w, h);
+      }
+      ctx.globalAlpha = 1;
       for (const s of people) {
         const x = s.x * w, y = s.y * h;
         const mine = s.id === myId, picked = s.id === selected, isLive = cachedPresence.has(s.id);
+        if (sharedStarLayers.length && !mine && !picked) continue;
         livingStar(ctx, x, y, s.hue, t, s.x + s.y * 2.4, mine, picked, isLive, cachedGlowCounts.get(s.id) ?? 0);
         if ((mine || picked) && !refs.current.intro) {
           ctx.globalCompositeOperation = "source-over";
