@@ -354,6 +354,10 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     let finalFireballSent = false;
     let lastPaint = 0;
     let drawnSky: Star[] | null = null;
+    // Growth follows new memories with a slow physical response. A freshly
+    // placed star should not make nine leaves pop into existence at once.
+    let treeStarGrowth = refs.current.stars.length;
+    let treeGlowGrowth = refs.current.glows.length;
     let drawnGlows: Glow[] | null = null;
     let drawnPresence: string[] | null = null;
     let cachedGlowCounts = new Map<string, number>();
@@ -427,6 +431,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         frame = requestAnimationFrame(render);
         return;
       }
+      const deltaSeconds = lastPaint ? Math.min(.12, (now - lastPaint) / 1000) : .033;
       lastPaint = now;
       const t = (now - timeZero) / 1000;
       ctx.clearRect(0, 0, w, h);
@@ -449,7 +454,10 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
 
       if (terrainLayer) ctx.drawImage(terrainLayer, 0, 0, w, h);
 
-      drawMemoryTree(ctx, w, h, t, refs.current.stars.length, refs.current.glows.length);
+      const growthEase = 1 - Math.exp(-deltaSeconds / 19);
+      treeStarGrowth += (refs.current.stars.length - treeStarGrowth) * growthEase;
+      treeGlowGrowth += (refs.current.glows.length - treeGlowGrowth) * growthEase;
+      drawMemoryTree(ctx, w, h, t, treeStarGrowth, treeGlowGrowth);
 
       if (refs.current.showerKey > seenShower) {
         seenShower = refs.current.showerKey;
