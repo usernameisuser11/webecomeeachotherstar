@@ -14,6 +14,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 .sky-canvas { position:absolute; inset:0; display:block; width:100%; height:100%; z-index:0; touch-action:manipulation; cursor:crosshair; }
 .sky-canvas.placing { cursor:crosshair; z-index:5; }
 .stellar-particles { position:absolute; inset:0; width:100%; height:100%; display:block; z-index:1; pointer-events:none; mix-blend-mode:screen; -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 82%); mask-image:linear-gradient(to bottom,#000 0%,#000 70%,transparent 82%); }
+.meteor-layer { position:absolute; inset:0; display:block; width:100%; height:100%; z-index:2; pointer-events:none; }
 .photo-label { display:none; }
 .film-grain { position:absolute; inset:-50%; z-index:1; pointer-events:none; opacity:.038; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.69' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E"); }
 .top-vignette { position:absolute; inset:0; z-index:1; pointer-events:none; background:linear-gradient(180deg,rgba(0,4,14,.40),transparent 24%,transparent 74%,rgba(0,4,14,.48)),radial-gradient(ellipse at 50% 50%,transparent 52%,rgba(0,4,14,.22) 100%); }

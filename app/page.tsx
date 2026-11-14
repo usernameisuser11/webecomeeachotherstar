@@ -80,6 +80,7 @@ export default function Home() {
   const [publicRooms, setPublicRooms] = useState<Room[]>([]);
   const [myRooms, setMyRooms] = useState<Room[]>([]);
   const skyCanvas = useRef<HTMLCanvasElement | null>(null);
+  const meteorCanvas = useRef<HTMLCanvasElement | null>(null);
   const particleCanvas = useRef<HTMLCanvasElement | null>(null);
   const skyDisplayRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
@@ -365,6 +366,7 @@ export default function Home() {
     if (!painter) return;
     painter.drawImage(sky, 0, 0, image.width, image.height);
     if (particleCanvas.current) painter.drawImage(particleCanvas.current, 0, 0, image.width, image.height);
+    if (meteorCanvas.current) painter.drawImage(meteorCanvas.current, 0, 0, image.width, image.height);
     image.toBlob(blob => {
       if (!blob) return;
       const url = URL.createObjectURL(blob), a = document.createElement("a");
@@ -394,7 +396,7 @@ export default function Home() {
   useEffect(() => () => { audioRef.current?.close().catch(() => {}); }, []);
 
   return <main className="observatory">
-    <NightSky stars={sky.stars} glows={sky.glows} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
+    <NightSky stars={sky.stars} glows={sky.glows} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} meteorCanvasRef={meteorCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
     <StellarParticles theme={activeRoom?.theme || "forest"} canvasRef={particleCanvas} />
     <div className="film-grain" aria-hidden="true" /><div className="top-vignette" aria-hidden="true" />
     <header className="topbar">
