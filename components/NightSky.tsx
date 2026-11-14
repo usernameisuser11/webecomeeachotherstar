@@ -16,6 +16,8 @@ type Props = {
   placing: boolean;
   showerKey: number;
   showConstellations: boolean;
+  showStarNames: boolean;
+  intro: boolean;
   theme: SkyTheme;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   onSpot: (x: number, y: number) => void;
@@ -330,10 +332,11 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   ctx.fillStyle = bottom; ctx.fillRect(0, h * .91, w, h * .09);
 }
 
-export default function NightSky({ stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, theme, canvasRef, onSpot, onSelectStar }: Props) {
-  const refs = useRef({ stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, onSpot, onSelectStar });
-  useEffect(() => { refs.current = { stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, onSpot, onSelectStar }; }, [stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, onSpot, onSelectStar]);
+export default function NightSky({ stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, theme, canvasRef, onSpot, onSelectStar }: Props) {
+  const refs = useRef({ stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar });
+  useEffect(() => { refs.current = { stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar }; }, [stars, glows, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar]);
   const local = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+  const labelHits = useRef<{ id: string; x: number; y: number; width: number; height: number }[]>([]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -364,6 +367,9 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     let cachedPresence = new Set<string>();
     let cachedLinks: ConstellationLink[] = [];
     let constellationLayer: HTMLCanvasElement | null = null;
+    let labelLayer: HTMLCanvasElement | null = null;
+    let labelCacheKey = "";
+    let labeledSky: Star[] | null = null;
 
     function prepareConstellations(people: Star[]) {
       drawnSky = people;
@@ -376,16 +382,69 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       painter.setTransform(dpr, 0, 0, dpr, 0, 0);
       for (const { a, b, distance } of cachedLinks) {
         const fade = 1 - distance / (Math.min(w, h) * .38);
-        const alpha = .075 + .12 * fade;
+        const alpha = .21 + .18 * fade;
         const beam = painter.createLinearGradient(a.x * w, a.y * h, b.x * w, b.y * h);
-        beam.addColorStop(0, `rgba(143,195,246,${alpha})`);
-        beam.addColorStop(.5, `rgba(205,176,251,${alpha * .35})`);
-        beam.addColorStop(1, `rgba(143,195,246,${alpha})`);
-        painter.strokeStyle = beam;
-        painter.lineWidth = .55;
+        beam.addColorStop(0, `rgba(150,203,242,${alpha})`);
+        beam.addColorStop(.5, `rgba(194,194,244,${alpha * .78})`);
+        beam.addColorStop(1, `rgba(150,203,242,${alpha})`);
+        painter.strokeStyle = `rgba(122,170,225,${alpha * .15})`;
+        painter.lineWidth = 2.7;
         painter.beginPath(); painter.moveTo(a.x * w, a.y * h); painter.lineTo(b.x * w, b.y * h); painter.stroke();
+        painter.strokeStyle = beam;
+        painter.lineWidth = .68;
+        painter.beginPath(); painter.moveTo(a.x * w, a.y * h); painter.lineTo(b.x * w, b.y * h); painter.stroke();
+        // Star Walk-inspired pinpoints give the connection a recognizable
+        // stellar rhythm without drawing a thick, game-like laser beam.
+        painter.strokeStyle = `rgba(204,224,250,${alpha * .93})`;
+        painter.lineWidth = 1.05;
+        painter.lineCap = "round";
+        painter.setLineDash([.8, 4]);
+        painter.beginPath(); painter.moveTo(a.x * w, a.y * h); painter.lineTo(b.x * w, b.y * h); painter.stroke();
+        painter.setLineDash([]);
       }
       constellationLayer = layer;
+    }
+
+    function prepareLabels(people: Star[], myId: string | null, selected: string | null) {
+      const layer = document.createElement("canvas");
+      layer.width = Math.max(1, Math.round(w * dpr));
+      layer.height = Math.max(1, Math.round(h * dpr));
+      const painter = layer.getContext("2d");
+      labelHits.current = [];
+      if (!painter) { labelLayer = null; return; }
+      painter.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const fontSize = w < 750 ? 10.5 : 11;
+      painter.font = `400 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif`;
+      painter.textAlign = "center";
+      painter.textBaseline = "middle";
+      const occupied: { x: number; y: number; width: number; height: number }[] = [];
+      const special = people.filter(s => s.id === selected || s.id === myId);
+      const ordinary = people.filter(s => s.id !== selected && s.id !== myId);
+      // Reserve the places of the selected and owned stars even when the
+      // names layer is disabled: their names must always remain legible.
+      for (const star of [...special, ...ordinary]) {
+        const px = star.x * w, py = star.y * h;
+        const textWidth = Math.min(112, painter.measureText(star.name).width);
+        const width = textWidth + 14, height = 17;
+        const x = clamp(px, width / 2 + 7, w - width / 2 - 7);
+        const y = py + 19;
+        if (y < 108 || y + height / 2 > h * .78) continue;
+        const box = { x: x - width / 2, y: y - height / 2, width, height };
+        const overlaps = occupied.some(b => box.x < b.x + b.width + 6 && box.x + box.width + 6 > b.x && box.y < b.y + b.height + 5 && box.y + box.height + 5 > b.y);
+        if (overlaps && !special.includes(star)) continue;
+        occupied.push(box);
+        if (star.id === myId || star.id === selected) continue;
+        painter.strokeStyle = "rgba(183,209,232,.24)";
+        painter.lineWidth = .65;
+        painter.beginPath(); painter.moveTo(px, py + 5); painter.lineTo(px, py + 9); painter.stroke();
+        painter.shadowColor = "rgba(1,6,20,.98)";
+        painter.shadowBlur = 6;
+        painter.fillStyle = "rgba(219,230,241,.82)";
+        painter.fillText(star.name, x, y, 112);
+        painter.shadowBlur = 0;
+        labelHits.current.push({ id: star.id, ...box });
+      }
+      labelLayer = layer;
     }
 
     function resize() {
@@ -406,6 +465,8 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       if (terrainCtx) { terrainCtx.setTransform(dpr, 0, 0, dpr, 0, 0); landscape(terrainCtx, w, h, 0, theme); }
       ambientStars = makeAmbientStars(w, h);
       drawnSky = null;
+      labelCacheKey = "";
+      labeledSky = null;
     }
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas);
@@ -514,6 +575,13 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
 
       const { stars: people, glows: lights, liveStarIds: live, myStarId: myId, selectedId: selected } = refs.current;
       if (drawnSky !== people) prepareConstellations(people);
+      const labelsKey = `${refs.current.showStarNames}:${myId ?? ""}:${selected ?? ""}`;
+      if (labelCacheKey !== labelsKey || labeledSky !== people) {
+        if (refs.current.showStarNames) prepareLabels(people, myId, selected);
+        else { labelLayer = null; labelHits.current = []; }
+        labeledSky = people;
+        labelCacheKey = labelsKey;
+      }
       if (drawnGlows !== lights) {
         drawnGlows = lights;
         cachedGlowCounts = new Map();
@@ -528,13 +596,19 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         if (selected) for (const { a, b, distance, key } of cachedLinks) {
           if (a.id !== selected && b.id !== selected) continue;
           const lim = Math.min(w, h) * .38;
-          const alpha = .33 + .18 * (1 - distance / lim);
+          const alpha = .51 + .18 * (1 - distance / lim);
           const beam = ctx.createLinearGradient(a.x*w, a.y*h, b.x*w, b.y*h);
           beam.addColorStop(0, `rgba(143,195,246,${alpha})`);
           beam.addColorStop(.5, `rgba(205,176,251,${alpha * .4})`);
           beam.addColorStop(1, `rgba(143,195,246,${alpha})`);
-          ctx.strokeStyle = beam; ctx.lineWidth = .9;
+          ctx.strokeStyle = beam; ctx.lineWidth = 1.12;
           ctx.beginPath(); ctx.moveTo(a.x*w, a.y*h); ctx.lineTo(b.x*w, b.y*h); ctx.stroke();
+          ctx.strokeStyle = `rgba(225,237,255,${alpha * .75})`;
+          ctx.lineWidth = 1.24;
+          ctx.lineCap = "round";
+          ctx.setLineDash([1.2, 4.4]);
+          ctx.beginPath(); ctx.moveTo(a.x*w, a.y*h); ctx.lineTo(b.x*w, b.y*h); ctx.stroke();
+          ctx.setLineDash([]);
           // Even on a selected constellation, its stars and light nodes stay
           // put: only the faint light at the midpoint gently scintillates.
           const px = (a.x + b.x) * .5 * w, py = (a.y + b.y) * .5 * h;
@@ -547,16 +621,20 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         const x = s.x * w, y = s.y * h;
         const mine = s.id === myId, picked = s.id === selected, isLive = cachedPresence.has(s.id);
         livingStar(ctx, x, y, s.hue, t, s.x + s.y * 2.4, mine, picked, isLive, cachedGlowCounts.get(s.id) ?? 0);
-        if (mine || picked) {
+        if ((mine || picked) && !refs.current.intro) {
           ctx.globalCompositeOperation = "source-over";
           ctx.font = `${mine ? '500' : '400'} 11px -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif`;
           ctx.textAlign = "center";
           ctx.fillStyle = "rgba(238,235,255,.88)";
           ctx.shadowColor = "rgba(3,7,22,.9)"; ctx.shadowBlur = 8;
-          ctx.fillText(s.name, clamp(x, 50, w - 50), y - 19, Math.min(150, w * .4));
+          ctx.fillText(s.name, clamp(x, 50, w - 50), y + 19, Math.min(150, w * .4));
           ctx.shadowBlur = 0;
           ctx.globalCompositeOperation = "screen";
         }
+      }
+      if (refs.current.showStarNames && !refs.current.placing && !refs.current.intro && labelLayer) {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.drawImage(labelLayer, 0, 0, w, h);
       }
       ctx.restore();
 
@@ -586,6 +664,10 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       if (refs.current.placing) {
         if (x >= .07 && x <= .93 && y >= .11 && y <= .69) refs.current.onSpot(x, y);
         return;
+      }
+      if (refs.current.showStarNames && !refs.current.intro) {
+        const hit = labelHits.current.findLast(b => (e.clientX - rect.left) >= b.x - 4 && (e.clientX - rect.left) <= b.x + b.width + 4 && (e.clientY - rect.top) >= b.y - 6 && (e.clientY - rect.top) <= b.y + b.height + 6);
+        if (hit) { refs.current.onSelectStar(hit.id); return; }
       }
       const { w, h } = local.current;
       const nearest = refs.current.stars.map((s) => ({ s, d: Math.hypot((s.x - x) * w, (s.y - y) * h) })).sort((a, b) => a.d - b.d)[0];

@@ -49,6 +49,17 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
 .scene-pill:hover { background:rgba(40,66,87,.83); border-color:rgba(219,238,244,.6); }
 .scene-pill.warm { border-color:rgba(182,232,220,.50); color:#def4ed; }
 .scene-pill.icon-only { padding:0; width:42px; justify-content:center; }
+.sky-display-wrap { position:relative; display:flex; align-self:stretch; }
+.sky-display-wrap>.scene-pill { width:100%; }
+.sky-display-popover { position:absolute; z-index:21; right:0; bottom:calc(100% + 12px); width:238px; padding:13px; border-radius:12px; border:1px solid rgba(184,218,229,.28); background:rgba(7,19,37,.96); color:#e1ebf1; box-shadow:0 15px 55px #0009; backdrop-filter:blur(22px); }
+.display-heading { display:block; padding:4px 7px 10px; color:#91a9ba; font-size:10px; letter-spacing:.08em; }
+.sky-display-popover button { width:100%; display:flex; align-items:center; gap:9px; padding:11px 7px; text-align:left; border:0; border-top:1px solid rgba(194,219,236,.12); background:transparent; color:#e2eaf0; font-size:12px; }
+.sky-display-popover button:hover { background:rgba(115,165,185,.1); }
+.sky-display-popover button svg { color:#b8d6df; flex:none; }
+.sky-display-popover button>span:nth-child(2) { flex:1; }
+.display-check { color:#8193a9; font-size:10px; }
+.display-check.enabled { color:#b5e9df; }
+.sky-display-popover p { margin:7px 7px 2px; font-size:10px; line-height:1.65; color:#9db0c1; }
 .bottom-annotation { position:absolute; z-index:2; bottom:54px; left:clamp(24px,5.5vw,92px); font-size:11px; letter-spacing:-.015em; color:rgba(201,219,230,.58); display:flex; gap:10px; align-items:center; pointer-events:none; }
 .signal-beam { width:5px; height:5px; border-radius:50%; background:#9cdddc; box-shadow:0 0 15px 3px #73bcd8; animation:blink 3.5s ease-in-out infinite; }
 .star-index { position:absolute; z-index:8; left:clamp(24px,5.5vw,92px); bottom:105px; width:min(440px,calc(100% - 48px)); }
@@ -261,6 +272,9 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
   .quiet-cta svg { width:13px; height:13px; }
   .scene-controls { left:14px; right:14px; bottom:calc(11px + env(safe-area-inset-bottom)); display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; border-top:1px solid rgba(196,215,232,.18); padding-top:9px; background:linear-gradient(180deg,rgba(1,8,19,0),rgba(1,8,19,.32)); }
   .scene-pill,.scene-pill.icon-only { border:0; background:transparent; backdrop-filter:none; width:auto; min-width:0; min-height:50px; padding:4px 0; border-radius:0; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:5px; font-size:11px; color:rgba(221,233,243,.82); }
+  .sky-display-wrap { min-width:0; }
+  .sky-display-wrap>.scene-pill { height:100%; }
+  .sky-display-popover { right:-53px; bottom:calc(100% + 13px); }
   .scene-pill.warm { color:#d5f0e8; border:0; }
   .scene-pill svg { width:18px; height:18px; stroke-width:1.4; }
   .photo-label { display:inline; }
@@ -290,6 +304,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
   .scene-pill { padding:4px 0; font-size:10px; gap:5px; }
   .scene-pill svg { width:17px; height:17px; }
   .scene-pill.icon-only { width:auto; }
+  .sky-display-popover { right:-84px; }
   .line-state { display:none; }
   .room-sheet { padding-left:18px; padding-right:18px; }
   .theme-choices { gap:5px; }

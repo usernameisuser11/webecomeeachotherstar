@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Camera, Check, CircleHelp, Flag, Heart, Link2, Plus, ShieldCheck, Sparkles, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowUpRight, Camera, Check, CircleHelp, Flag, Heart, Link2, Plus, ShieldCheck, Sparkles, Tags, Trash2, Volume2, VolumeX, Waypoints, X } from "lucide-react";
 import NightSky, { type Glow, type Star } from "../components/NightSky";
 import StellarParticles from "../components/StellarParticles";
 
@@ -64,6 +64,8 @@ export default function Home() {
   const [online, setOnline] = useState(true);
   const [soundOn, setSoundOn] = useState(false);
   const [showConstellations, setShowConstellations] = useState(true);
+  const [showStarNames, setShowStarNames] = useState(false);
+  const [skyDisplayOpen, setSkyDisplayOpen] = useState(false);
   const [activeRoom, setActiveRoom] = useState<ActiveRoom | null>(null);
   const [roomPanel, setRoomPanel] = useState<"directory" | "create" | "moderation" | null>(null);
   const [moderationRoom, setModerationRoom] = useState<Room | null>(null);
@@ -79,10 +81,24 @@ export default function Home() {
   const [myRooms, setMyRooms] = useState<Room[]>([]);
   const skyCanvas = useRef<HTMLCanvasElement | null>(null);
   const particleCanvas = useRef<HTMLCanvasElement | null>(null);
+  const skyDisplayRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const tokenRef = useRef("");
   const myStarRef = useRef<string | null>(null);
   const roomRef = useRef<ActiveRoom | null>(null);
+
+  useEffect(() => {
+    if (!skyDisplayOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!skyDisplayRef.current?.contains(event.target as Node)) setSkyDisplayOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSkyDisplayOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeOnEscape); };
+  }, [skyDisplayOpen]);
 
   useEffect(() => {
     let personalToken = "";
@@ -94,6 +110,7 @@ export default function Home() {
       setName(localStorage.getItem("our-sky-star-name-v1") || "");
       setWish(privateWish());
       setShowConstellations(localStorage.getItem("our-sky-constellations-v1") !== "off");
+      setShowStarNames(localStorage.getItem("our-sky-star-labels-v1") === "on");
     } catch { personalToken = newToken(); }
     tokenRef.current = personalToken;
     setToken(personalToken);
@@ -377,7 +394,7 @@ export default function Home() {
   useEffect(() => () => { audioRef.current?.close().catch(() => {}); }, []);
 
   return <main className="observatory">
-    <NightSky stars={sky.stars} glows={sky.glows} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
+    <NightSky stars={sky.stars} glows={sky.glows} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
     <StellarParticles theme={activeRoom?.theme || "forest"} canvasRef={particleCanvas} />
     <div className="film-grain" aria-hidden="true" /><div className="top-vignette" aria-hidden="true" />
     <header className="topbar">
@@ -411,7 +428,15 @@ export default function Home() {
       <div className="resting-caption"><span className="script-star">✧</span> 이곳에 머문 빛은 사라지지 않아요</div>
       <section className="scene-controls" aria-label="밤하늘 기능">
         <button className="scene-pill warm" onClick={startCreate}><Sparkles size={17} /> {myStar ? "나의 별" : "별 남기기"}</button>
-        <button className={`scene-pill line-switch ${showConstellations ? "on" : ""}`} onClick={() => setShowConstellations(v => { try { localStorage.setItem("our-sky-constellations-v1", v ? "off" : "on"); } catch {} return !v; })} aria-label={showConstellations ? "별자리 선 숨기기" : "별자리 선 표시하기"} aria-pressed={showConstellations}>✧ <span>별자리<span className="line-state"> {showConstellations ? "켜짐" : "꺼짐"}</span></span></button>
+        <div className="sky-display-wrap" ref={skyDisplayRef}>
+          <button className={`scene-pill line-switch ${showConstellations || showStarNames ? "on" : ""}`} onClick={() => setSkyDisplayOpen(v => !v)} aria-label="별자리 표시 설정" aria-expanded={skyDisplayOpen} aria-controls="sky-display-options"><Waypoints size={17} strokeWidth={1.4} /> <span>별자리<span className="line-state"> 설정</span></span></button>
+          {skyDisplayOpen && <div id="sky-display-options" className="sky-display-popover" role="group" aria-label="별자리 표시 설정">
+            <span className="display-heading">밤하늘 표시</span>
+            <button type="button" aria-pressed={showConstellations} onClick={() => setShowConstellations(v => { try { localStorage.setItem("our-sky-constellations-v1", v ? "off" : "on"); } catch {} return !v; })}><Waypoints size={15} /> <span>별자리 연결선</span><span className={`display-check ${showConstellations ? "enabled" : ""}`}>{showConstellations ? "켜짐" : "꺼짐"}</span></button>
+            <button type="button" aria-pressed={showStarNames} onClick={() => setShowStarNames(v => { try { localStorage.setItem("our-sky-star-labels-v1", v ? "off" : "on"); } catch {} return !v; })}><Tags size={15} /> <span>별 이름 표시</span><span className={`display-check ${showStarNames ? "enabled" : ""}`}>{showStarNames ? "켜짐" : "꺼짐"}</span></button>
+            <p>이름을 누르면 그 별의 이야기를 볼 수 있습니다.</p>
+          </div>}
+        </div>
         <button className="scene-pill" onClick={() => { setShowerKey(v => v+1); setToast("잠시 하늘을 바라봐 주세요. 유성우가 시작됩니다."); }}><Sparkles size={17} /> 유성우</button>
         <button className="scene-pill icon-only" onClick={downloadScene} aria-label="밤하늘 사진 저장"><Camera size={18} /><span className="photo-label">사진</span></button>
       </section>
