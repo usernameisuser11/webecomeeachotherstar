@@ -141,6 +141,34 @@ function makeAmbientStars(w: number, h: number): AmbientStar[] {
 function constellationLinks(stars: Star[], w: number, h: number): ConstellationLink[] {
   const links: ConstellationLink[] = [];
   const seen = new Set<string>();
+  const addLink = (a: Star, b: Star, distSq: number) => {
+    if (distSq < 144) return;
+    const key = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    links.push({ a, b, distance: Math.sqrt(distSq), key });
+  };
+
+  if (stars.length <= 24) {
+    // A small shared sky must still form a constellation: the older near-
+    // neighbor cutoff left widely spaced memories completely disconnected.
+    // A minimum spanning tree keeps the shape open and avoids big triangles.
+    const visited = new Set<number>(stars.length ? [0] : []);
+    while (visited.size < stars.length) {
+      let first = -1, second = -1, best = Infinity;
+      for (const i of visited) for (let j = 0; j < stars.length; j++) {
+        if (visited.has(j)) continue;
+        const dx = (stars[i].x - stars[j].x) * w, dy = (stars[i].y - stars[j].y) * h;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < best) { first = i; second = j; best = distSq; }
+      }
+      if (first < 0 || second < 0) break;
+      visited.add(second);
+      addLink(stars[first], stars[second], best);
+    }
+    return links;
+  }
+
   const limitSq = (Math.min(w, h) * .38) ** 2;
   for (let i = 0; i < stars.length; i++) {
     const a = stars[i];
@@ -155,11 +183,7 @@ function constellationLinks(stars: Star[], w: number, h: number): ConstellationL
     }
     for (const [index, distSq] of [[closest, d1], [second, d2]]) {
       if (index < 0 || distSq > limitSq || distSq < 225) continue;
-      const b = stars[index];
-      const key = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      links.push({ a, b, distance: Math.sqrt(distSq), key });
+      addLink(a, stars[index], distSq);
     }
   }
   return links;
@@ -381,7 +405,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       if (!painter) { constellationLayer = null; return; }
       painter.setTransform(dpr, 0, 0, dpr, 0, 0);
       for (const { a, b, distance } of cachedLinks) {
-        const fade = 1 - distance / (Math.min(w, h) * .38);
+        const fade = clamp(1 - distance / (Math.hypot(w, h) * .85), 0, 1);
         const alpha = .21 + .18 * fade;
         const beam = painter.createLinearGradient(a.x * w, a.y * h, b.x * w, b.y * h);
         beam.addColorStop(0, `rgba(150,203,242,${alpha})`);
@@ -595,8 +619,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
         // connections are a quiet cached layer and cost a single draw call.
         if (selected) for (const { a, b, distance, key } of cachedLinks) {
           if (a.id !== selected && b.id !== selected) continue;
-          const lim = Math.min(w, h) * .38;
-          const alpha = .51 + .18 * (1 - distance / lim);
+          const alpha = .51 + .18 * clamp(1 - distance / (Math.hypot(w, h) * .85), 0, 1);
           const beam = ctx.createLinearGradient(a.x*w, a.y*h, b.x*w, b.y*h);
           beam.addColorStop(0, `rgba(143,195,246,${alpha})`);
           beam.addColorStop(.5, `rgba(205,176,251,${alpha * .4})`);
