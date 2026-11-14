@@ -24,7 +24,7 @@ type Props = {
   onSelectStar: (id: string) => void;
 };
 
-type Meteor = { x: number; y: number; vx: number; vy: number; length: number; born: number; life: number; bright: number; warmth: number };
+type Meteor = { x: number; y: number; vx: number; vy: number; length: number; born: number; life: number; bright: number; warm: boolean };
 type AmbientStar = { x: number; y: number; radius: number; alpha: number; speed: number; phase: number; tint: string };
 type ConstellationLink = { a: Star; b: Star; distance: number; key: string };
 
@@ -198,6 +198,45 @@ function halo(ctx: CanvasRenderingContext2D, x: number, y: number, radius: numbe
   ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
 }
 
+// The atmosphere-lit core and tapered wake are painted just once. Moving
+// these small sprites is substantially cheaper than making 4–6 gradients for
+// every meteor on every frame, especially on mobile Safari.
+const meteorSprites = new Map<string, HTMLCanvasElement>();
+function meteorSprite(warm: boolean) {
+  const key = warm ? "warm" : "cool";
+  const cached = meteorSprites.get(key);
+  if (cached) return cached;
+  const surface = document.createElement("canvas");
+  surface.width = 512;
+  surface.height = 56;
+  const g = surface.getContext("2d")!;
+  const tail = warm ? "246,199,151" : "153,204,241";
+  const core = warm ? "255,238,214" : "238,249,255";
+  const streak = g.createLinearGradient(0, 0, 501, 0);
+  streak.addColorStop(0, `rgba(${tail},0)`);
+  streak.addColorStop(.30, `rgba(${tail},.035)`);
+  streak.addColorStop(.62, `rgba(${tail},.15)`);
+  streak.addColorStop(.84, `rgba(${tail},.48)`);
+  streak.addColorStop(1, `rgba(${core},.92)`);
+  g.lineCap = "round";
+  for (const [width, alpha] of [[20, .22], [6, .48], [2, .86]] as const) {
+    g.globalAlpha = alpha;
+    g.strokeStyle = streak;
+    g.lineWidth = width;
+    g.beginPath(); g.moveTo(6, 28); g.lineTo(496, 28); g.stroke();
+  }
+  g.globalAlpha = 1;
+  const head = g.createRadialGradient(496, 28, 0, 496, 28, 19);
+  head.addColorStop(0, `rgba(${core},.86)`);
+  head.addColorStop(.18, `rgba(${tail},.23)`);
+  head.addColorStop(1, `rgba(${tail},0)`);
+  g.fillStyle = head; g.fillRect(477, 9, 38, 38);
+  g.fillStyle = `rgba(${core},.96)`;
+  g.beginPath(); g.arc(496, 28, 2.1, 0, TAU); g.fill();
+  meteorSprites.set(key, surface);
+  return surface;
+}
+
 // Each hue gets two cached optical point-spread sprites. At 300–500 stars,
 // redrawing multiple gradients per star on every frame stutters on phones.
 const starSprites = new Map<string, HTMLCanvasElement>();
@@ -369,16 +408,22 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     let destroyed = false, frame = 0;
     let backdrop: HTMLCanvasElement | null = null;
     let terrainLayer: HTMLCanvasElement | null = null;
+    let treeLayer: HTMLCanvasElement | null = null;
+    let treeCtx: CanvasRenderingContext2D | null = null;
+    let lastTreePaint = -Infinity;
     let ambientStars: AmbientStar[] = [];
     let w = 0, h = 0, dpr = 1;
     const timeZero = performance.now();
     const meteors: Meteor[] = [];
     const random = rng(31027);
-    let nextMeteor = 2.5;
-    let seenShower = 0;
+    // Pre-warm both meteor textures outside the animation loop.
+    meteorSprite(false);
+    meteorSprite(true);
+    let nextMeteor = 8;
+    let seenShower = refs.current.showerKey;
     let showerUntil = -1;
     let showerStartedAt = -1;
-    let finalFireballSent = false;
+    let showerMeteorCount = 0;
     let lastPaint = 0;
     let drawnSky: Star[] | null = null;
     // Growth follows new memories with a slow physical response. A freshly
@@ -473,6 +518,12 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       terrainLayer.height = canvas.height;
       const terrainCtx = terrainLayer.getContext("2d");
       if (terrainCtx) { terrainCtx.setTransform(dpr, 0, 0, dpr, 0, 0); landscape(terrainCtx, w, h, 0, theme); }
+      treeLayer = document.createElement("canvas");
+      treeLayer.width = canvas.width;
+      treeLayer.height = canvas.height;
+      treeCtx = treeLayer.getContext("2d", { alpha: true });
+      treeCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+      lastTreePaint = -Infinity;
       ambientStars = makeAmbientStars(w, h);
       drawnSky = null;
       labelCacheKey = "";
@@ -483,16 +534,19 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     resize();
 
     function spawnMeteor(t: number, bright = 1) {
-      // Real meteors flare briefly, with varying apparent lengths and angles.
-      // A few brighter fireballs linger; most streaks are short and restrained.
-      const x = w * (.23 + random() * .88), y = h * (.06 + random() * .43);
-      const velocity = 125 + random() * 125;
-      const slope = .25 + random() * .67;
+      // Keep the whole flash visible in the actual phone viewport. Meteors
+      // from one shower share an approximate direction, with slight variation.
+      const x = w * (.34 + random() * .61);
+      const y = h * (.20 + random() * .37);
+      const speed = (w < 750 ? 175 : Math.min(390, Math.max(215, w * .30))) * (.86 + random() * .34);
+      const angle = .32 + random() * .39;
+      const fireball = bright > 1.1;
       meteors.push({
-        x, y, vx: -velocity, vy: velocity * slope,
-        born: t, length: Math.min(w * .21, (22 + random() * 56) * (bright > 1.1 ? 1.5 : 1)),
-        life: bright > 1.1 ? 1.55 : .68 + random() * .56,
-        bright, warmth: random(),
+        x, y, vx: -speed * Math.cos(angle), vy: speed * Math.sin(angle),
+        born: t,
+        length: Math.min(w * .34, (57 + random() * 72) * (fireball ? 1.32 : 1)),
+        life: fireball ? 1.42 + random() * .22 : .92 + random() * .32,
+        bright, warm: random() > .91,
       });
     }
 
@@ -528,58 +582,54 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       const growthEase = 1 - Math.exp(-deltaSeconds / 19);
       treeStarGrowth += (refs.current.stars.length - treeStarGrowth) * growthEase;
       treeGlowGrowth += (refs.current.glows.length - treeGlowGrowth) * growthEase;
-      drawMemoryTree(ctx, w, h, t, treeStarGrowth, treeGlowGrowth);
+      // Tree growth and motes change slowly. Reuse a transparent tree frame on
+      // phones; the main starfield and moving meteors still refresh at 30 fps.
+      if (treeLayer && treeCtx) {
+        if (now - lastTreePaint >= (w < 750 ? 1000 / 17 : 1000 / 30)) {
+          treeCtx.clearRect(0, 0, w, h);
+          drawMemoryTree(treeCtx, w, h, t, treeStarGrowth, treeGlowGrowth);
+          lastTreePaint = now;
+        }
+        ctx.drawImage(treeLayer, 0, 0, w, h);
+      }
 
       if (refs.current.showerKey > seenShower) {
         seenShower = refs.current.showerKey;
         showerStartedAt = t;
         showerUntil = t + 18;
         nextMeteor = t;
-        finalFireballSent = false;
+        showerMeteorCount = 0;
+        meteors.length = 0;
       }
       const isShower = t < showerUntil;
-      if (isShower && !finalFireballSent && t - showerStartedAt > 10) {
-        spawnMeteor(t, 1.22);
-        finalFireballSent = true;
-      }
-      if (t > nextMeteor) {
-        const progress = isShower ? clamp((t - showerStartedAt) / 18, 0, 1) : 0;
-        const intensity = isShower ? .88 + .12 * Math.sin(Math.PI * progress) : 1;
-        if (meteors.length < 3) spawnMeteor(t, isShower ? .73 + random() * .3 : .54);
-        nextMeteor = t + (isShower ? (1.15 + random() * 1.10) / intensity : 15 + random() * 20);
+      if (t >= nextMeteor) {
+        if (meteors.length < (w < 750 ? 2 : 3)) {
+          if (isShower) {
+            showerMeteorCount++;
+            const isFireball = showerMeteorCount === 5 || showerMeteorCount === 12;
+            spawnMeteor(t, isFireball ? 1.28 : .82 + random() * .18);
+          } else spawnMeteor(t, .70);
+        }
+        nextMeteor = t + (isShower ? .67 + random() * .50 : 23 + random() * 15);
       }
       for (let i = meteors.length - 1; i >= 0; i--) {
         const m = meteors[i];
         const age = t - m.born;
         if (age > m.life) { meteors.splice(i, 1); continue; }
         const px = m.x + age * m.vx, py = m.y + age * m.vy;
+        // A quick flare, a readable flight, then a soft vanishing wake. Use
+        // absolute elapsed time, so a slow frame never changes the trajectory.
         const fadeIn = clamp(age / .12, 0, 1);
-        const fadeOut = clamp((m.life - age) / (m.life * .57), 0, 1);
-        const alpha = Math.pow(fadeIn, .7) * Math.pow(fadeOut, .8) * m.bright;
-        const len = m.length * clamp(age / .24, 0, 1);
-        const dist = Math.hypot(m.vx, m.vy);
-        const tailX = px - (m.vx / dist) * len, tailY = py - (m.vy / dist) * len;
-        ctx.save(); ctx.globalCompositeOperation = "screen";
-        ctx.lineCap = "round";
-        const warm = m.warmth > .95;
-        const coreColor = warm ? "255,237,216" : "242,250,255";
-        const tailColor = warm ? "245,211,185" : "160,207,238";
-        for (const layer of [
-          { width: 3.0, power: .09 },
-          { width: .72, power: .82 },
-        ]) {
-          const stroke = ctx.createLinearGradient(px, py, tailX, tailY);
-          stroke.addColorStop(0, `rgba(${coreColor},${clamp(alpha * layer.power, 0, 1)})`);
-          stroke.addColorStop(.18, `rgba(${tailColor},${clamp(alpha * layer.power * .58, 0, 1)})`);
-          stroke.addColorStop(.62, `rgba(${tailColor},${clamp(alpha * layer.power * .10, 0, 1)})`);
-          stroke.addColorStop(1, `rgba(${tailColor},0)`);
-          ctx.strokeStyle = stroke;
-          ctx.lineWidth = layer.width * (m.bright > 1.1 ? 1.13 : 1);
-          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(tailX, tailY); ctx.stroke();
-        }
-        if (m.bright > 1.1) halo(ctx, px, py, 8, warm ? "rgba(255,218,188,ALPHA)" : "rgba(205,228,249,ALPHA)", clamp(alpha * .24, 0, .36));
-        ctx.fillStyle = `rgba(${coreColor},${clamp(alpha * .94, 0, 1)})`;
-        ctx.beginPath(); ctx.arc(px, py, m.bright > 1.1 ? 1.2 : .73, 0, TAU); ctx.fill();
+        const fadeOut = clamp((m.life - age) / (m.life * .35), 0, 1);
+        const envelope = fadeIn * fadeIn * (3 - 2 * fadeIn) * fadeOut * fadeOut * (3 - 2 * fadeOut);
+        const len = m.length * clamp(age / .25, 0, 1);
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        ctx.globalAlpha = clamp(envelope * m.bright, 0, 1);
+        ctx.translate(px, py);
+        ctx.rotate(Math.atan2(m.vy, m.vx));
+        const height = m.bright > 1.1 ? 19 : 15;
+        ctx.drawImage(meteorSprite(m.warm), -len, -height / 2, len, height);
         ctx.restore();
       }
 
