@@ -406,25 +406,11 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       painter.setTransform(dpr, 0, 0, dpr, 0, 0);
       for (const { a, b, distance } of cachedLinks) {
         const fade = clamp(1 - distance / (Math.hypot(w, h) * .85), 0, 1);
-        const alpha = .21 + .18 * fade;
-        const beam = painter.createLinearGradient(a.x * w, a.y * h, b.x * w, b.y * h);
-        beam.addColorStop(0, `rgba(150,203,242,${alpha})`);
-        beam.addColorStop(.5, `rgba(194,194,244,${alpha * .78})`);
-        beam.addColorStop(1, `rgba(150,203,242,${alpha})`);
-        painter.strokeStyle = `rgba(122,170,225,${alpha * .15})`;
-        painter.lineWidth = 2.7;
+        // A single translucent line reads like a quiet star chart. Avoid
+        // dashed dots, doubled strokes and decorative beam effects.
+        painter.strokeStyle = `rgba(184,211,238,${.23 + .15 * fade})`;
+        painter.lineWidth = .92;
         painter.beginPath(); painter.moveTo(a.x * w, a.y * h); painter.lineTo(b.x * w, b.y * h); painter.stroke();
-        painter.strokeStyle = beam;
-        painter.lineWidth = .68;
-        painter.beginPath(); painter.moveTo(a.x * w, a.y * h); painter.lineTo(b.x * w, b.y * h); painter.stroke();
-        // Star Walk-inspired pinpoints give the connection a recognizable
-        // stellar rhythm without drawing a thick, game-like laser beam.
-        painter.strokeStyle = `rgba(204,224,250,${alpha * .93})`;
-        painter.lineWidth = 1.05;
-        painter.lineCap = "round";
-        painter.setLineDash([.8, 4]);
-        painter.beginPath(); painter.moveTo(a.x * w, a.y * h); painter.lineTo(b.x * w, b.y * h); painter.stroke();
-        painter.setLineDash([]);
       }
       constellationLayer = layer;
     }
@@ -615,28 +601,14 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       ctx.save(); ctx.globalCompositeOperation = "screen";
       if (refs.current.showConstellations) {
         if (constellationLayer) ctx.drawImage(constellationLayer, 0, 0, w, h);
-        // Animate only the constellation currently being observed. The other
-        // connections are a quiet cached layer and cost a single draw call.
-        if (selected) for (const { a, b, distance, key } of cachedLinks) {
+        // Only the selected star's existing straight connections become a
+        // little brighter. Everything else stays in a cached, calm layer.
+        if (selected) for (const { a, b, distance } of cachedLinks) {
           if (a.id !== selected && b.id !== selected) continue;
-          const alpha = .51 + .18 * clamp(1 - distance / (Math.hypot(w, h) * .85), 0, 1);
-          const beam = ctx.createLinearGradient(a.x*w, a.y*h, b.x*w, b.y*h);
-          beam.addColorStop(0, `rgba(143,195,246,${alpha})`);
-          beam.addColorStop(.5, `rgba(205,176,251,${alpha * .4})`);
-          beam.addColorStop(1, `rgba(143,195,246,${alpha})`);
-          ctx.strokeStyle = beam; ctx.lineWidth = 1.12;
+          const fade = clamp(1 - distance / (Math.hypot(w, h) * .85), 0, 1);
+          ctx.strokeStyle = `rgba(201,226,248,${.44 + .12 * fade})`;
+          ctx.lineWidth = 1.14;
           ctx.beginPath(); ctx.moveTo(a.x*w, a.y*h); ctx.lineTo(b.x*w, b.y*h); ctx.stroke();
-          ctx.strokeStyle = `rgba(225,237,255,${alpha * .75})`;
-          ctx.lineWidth = 1.24;
-          ctx.lineCap = "round";
-          ctx.setLineDash([1.2, 4.4]);
-          ctx.beginPath(); ctx.moveTo(a.x*w, a.y*h); ctx.lineTo(b.x*w, b.y*h); ctx.stroke();
-          ctx.setLineDash([]);
-          // Even on a selected constellation, its stars and light nodes stay
-          // put: only the faint light at the midpoint gently scintillates.
-          const px = (a.x + b.x) * .5 * w, py = (a.y + b.y) * .5 * h;
-          const breath = .84 + .16 * Math.sin(t * .37 + key.charCodeAt(0) * .13);
-          halo(ctx, px, py, 5, "rgba(167,211,255,ALPHA)", alpha * breath);
         }
       }
 

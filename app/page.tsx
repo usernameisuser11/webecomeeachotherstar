@@ -425,7 +425,7 @@ export default function Home() {
     </section>}
 
     {!intro && !placing && <>
-      <div className="resting-caption"><span className="script-star">✧</span> 이곳에 머문 빛은 사라지지 않아요</div>
+      {sky.stars.length === 0 && <div className="resting-caption"><span className="script-star">✧</span> 이곳에 머문 빛은 사라지지 않아요</div>}
       <section className="scene-controls" aria-label="밤하늘 기능">
         <button className="scene-pill warm" onClick={startCreate}><Sparkles size={17} /> {myStar ? "나의 별" : "별 남기기"}</button>
         <div className="sky-display-wrap" ref={skyDisplayRef}>
