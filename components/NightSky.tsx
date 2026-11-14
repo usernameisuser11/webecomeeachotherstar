@@ -24,7 +24,12 @@ type Props = {
   onSelectStar: (id: string) => void;
 };
 
-type Meteor = { x: number; y: number; vx: number; vy: number; length: number; born: number; life: number; bright: number; warm: boolean };
+type MeteorTint = "ice" | "mint" | "amber";
+type Meteor = {
+  x: number; y: number; vx: number; vy: number; length: number; wake: number;
+  born: number; flight: number; trainLife: number; bright: number;
+  fireball: boolean; flareAt: number; tint: MeteorTint;
+};
 type AmbientStar = { x: number; y: number; radius: number; alpha: number; speed: number; phase: number; tint: string };
 type ConstellationLink = { a: Star; b: Star; distance: number; key: string };
 
@@ -208,37 +213,43 @@ function halo(ctx: CanvasRenderingContext2D, x: number, y: number, radius: numbe
 // these small sprites is substantially cheaper than making 4–6 gradients for
 // every meteor on every frame, especially on mobile Safari.
 const meteorSprites = new Map<string, HTMLCanvasElement>();
-function meteorSprite(warm: boolean) {
-  const key = warm ? "warm" : "cool";
+// Short quiet gaps make the brighter passes feel like actual events, while
+// two closely spaced pairs give the shower a brief natural crescendo.
+const SHOWER_BEATS = [.18, 1.35, 2.6, 3.84, 4.19, 5.6, 6.8, 8.35, 9.65, 10.1, 11.25, 12.65, 13.04, 14.6, 15.8, 17.2];
+function meteorSprite(tint: MeteorTint, train = false) {
+  const key = `${tint}-${train}`;
   const cached = meteorSprites.get(key);
   if (cached) return cached;
   const surface = document.createElement("canvas");
   surface.width = 512;
   surface.height = 56;
   const g = surface.getContext("2d")!;
-  const tail = warm ? "246,199,151" : "153,204,241";
-  const core = warm ? "255,238,214" : "238,249,255";
+  const tail = tint === "amber" ? "248,188,138" : tint === "mint" ? "127,226,204" : "147,199,245";
+  const core = tint === "amber" ? "255,241,219" : tint === "mint" ? "234,255,247" : "242,250,255";
   const streak = g.createLinearGradient(0, 0, 501, 0);
   streak.addColorStop(0, `rgba(${tail},0)`);
-  streak.addColorStop(.30, `rgba(${tail},.035)`);
-  streak.addColorStop(.62, `rgba(${tail},.15)`);
-  streak.addColorStop(.84, `rgba(${tail},.48)`);
-  streak.addColorStop(1, `rgba(${core},.92)`);
+  streak.addColorStop(.23, `rgba(${tail},${train ? .05 : .02})`);
+  streak.addColorStop(.54, `rgba(${tail},${train ? .30 : .16})`);
+  streak.addColorStop(.78, `rgba(${tail},${train ? .32 : .54})`);
+  streak.addColorStop(1, `rgba(${core},${train ? .05 : .96})`);
   g.lineCap = "round";
-  for (const [width, alpha] of [[20, .22], [6, .48], [2, .86]] as const) {
+  const layers: readonly (readonly [number, number])[] = train ? [[20, .22], [7, .38], [2, .22]] : [[22, .30], [6, .54], [1.9, .98]];
+  for (const [width, alpha] of layers) {
     g.globalAlpha = alpha;
     g.strokeStyle = streak;
     g.lineWidth = width;
     g.beginPath(); g.moveTo(6, 28); g.lineTo(496, 28); g.stroke();
   }
   g.globalAlpha = 1;
-  const head = g.createRadialGradient(496, 28, 0, 496, 28, 19);
-  head.addColorStop(0, `rgba(${core},.86)`);
-  head.addColorStop(.18, `rgba(${tail},.23)`);
-  head.addColorStop(1, `rgba(${tail},0)`);
-  g.fillStyle = head; g.fillRect(477, 9, 38, 38);
-  g.fillStyle = `rgba(${core},.96)`;
-  g.beginPath(); g.arc(496, 28, 2.1, 0, TAU); g.fill();
+  if (!train) {
+    const head = g.createRadialGradient(496, 28, 0, 496, 28, 19);
+    head.addColorStop(0, `rgba(${core},.95)`);
+    head.addColorStop(.14, `rgba(${tail},.34)`);
+    head.addColorStop(1, `rgba(${tail},0)`);
+    g.fillStyle = head; g.fillRect(477, 9, 38, 38);
+    g.fillStyle = `rgba(${core},.97)`;
+    g.beginPath(); g.arc(496, 28, 2.25, 0, TAU); g.fill();
+  }
   meteorSprites.set(key, surface);
   return surface;
 }
@@ -421,14 +432,16 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     const timeZero = performance.now();
     const meteors: Meteor[] = [];
     const random = rng(31027);
-    // Pre-warm both meteor textures outside the animation loop.
-    meteorSprite(false);
-    meteorSprite(true);
+    // Warm all optical textures once, outside the animation loop.
+    for (const tint of ["ice", "mint", "amber"] as const) {
+      meteorSprite(tint);
+      meteorSprite(tint, true);
+    }
     let nextMeteor = 8;
     let seenShower = refs.current.showerKey;
     let showerUntil = -1;
     let showerStartedAt = -1;
-    let showerMeteorCount = 0;
+    let showerBeatIndex = 0;
     let lastPaint = 0;
     let drawnSky: Star[] | null = null;
     // Growth follows new memories with a slow physical response. A freshly
@@ -572,19 +585,25 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     resize();
 
     function spawnMeteor(t: number, bright = 1) {
-      // Keep the whole flash visible in the actual phone viewport. Meteors
-      // from one shower share an approximate direction, with slight variation.
-      const x = w * (.34 + random() * .61);
-      const y = h * (.20 + random() * .37);
-      const speed = (w < 750 ? 175 : Math.min(390, Math.max(215, w * .30))) * (.86 + random() * .34);
-      const angle = .32 + random() * .39;
-      const fireball = bright > 1.1;
+      // Keep a whole meteor in the portrait frame. A fireball travels farther,
+      // flares near the end and leaves a soft train after its head vanishes.
+      const fireball = bright > 1.16;
+      const x = w * (fireball ? .78 + random() * .17 : .38 + random() * .57);
+      const y = h * (.18 + random() * (fireball ? .30 : .43));
+      const speed = (w < 750 ? 188 : Math.min(490, Math.max(255, w * .36))) * (.85 + random() * .35) * (fireball ? 1.20 : 1);
+      const angle = .31 + random() * .41;
+      const tintRoll = random();
+      const tint: MeteorTint = fireball
+        ? tintRoll < .58 ? "mint" : tintRoll < .88 ? "ice" : "amber"
+        : tintRoll < .87 ? "ice" : tintRoll < .97 ? "mint" : "amber";
       meteors.push({
         x, y, vx: -speed * Math.cos(angle), vy: speed * Math.sin(angle),
         born: t,
-        length: Math.min(w * .34, (57 + random() * 72) * (fireball ? 1.32 : 1)),
-        life: fireball ? 1.42 + random() * .22 : .92 + random() * .32,
-        bright, warm: random() > .91,
+        length: Math.min(w * (fireball ? .46 : .34), (fireball ? 155 : 69) + random() * (fireball ? 90 : 74)),
+        wake: Math.min(w * (fireball ? .58 : .36), (fireball ? 194 : 80) + random() * 70),
+        flight: fireball ? 1.22 + random() * .22 : .75 + random() * .35,
+        trainLife: fireball ? 1.35 + random() * .60 : .18 + random() * .19,
+        bright, fireball, flareAt: .44 + random() * .28, tint,
       });
     }
 
@@ -629,40 +648,49 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       if (refs.current.showerKey > seenShower) {
         seenShower = refs.current.showerKey;
         showerStartedAt = t;
-        showerUntil = t + 18;
-        nextMeteor = t;
-        showerMeteorCount = 0;
+        showerUntil = t + 18.6;
+        nextMeteor = showerUntil + 13 + random() * 12;
+        showerBeatIndex = 0;
         meteors.length = 0;
       }
       const isShower = t < showerUntil;
-      if (t >= nextMeteor) {
-        if (meteors.length < (w < 750 ? 2 : 3)) {
-          if (isShower) {
-            showerMeteorCount++;
-            const isFireball = showerMeteorCount === 5 || showerMeteorCount === 12;
-            spawnMeteor(t, isFireball ? 1.28 : .82 + random() * .18);
-          } else spawnMeteor(t, .70);
+      if (isShower) {
+        while (showerBeatIndex < SHOWER_BEATS.length && t - showerStartedAt >= SHOWER_BEATS[showerBeatIndex]) {
+          const beat = showerBeatIndex++;
+          const fireball = beat === 4 || beat === 12;
+          spawnMeteor(t, fireball ? 1.32 : .79 + random() * .20);
         }
-        nextMeteor = t + (isShower ? .67 + random() * .50 : 23 + random() * 15);
+      } else if (t >= nextMeteor) {
+        if (meteors.length < 4) spawnMeteor(t, .69);
+        nextMeteor = t + 22 + random() * 15;
       }
       for (let i = meteors.length - 1; i >= 0; i--) {
         const m = meteors[i];
         const age = t - m.born;
-        if (age > m.life) { meteors.splice(i, 1); continue; }
-        const px = m.x + age * m.vx, py = m.y + age * m.vy;
-        // A quick flare, a readable flight, then a soft vanishing wake. Use
-        // absolute elapsed time, so a slow frame never changes the trajectory.
-        const fadeIn = clamp(age / .12, 0, 1);
-        const fadeOut = clamp((m.life - age) / (m.life * .35), 0, 1);
-        const envelope = fadeIn * fadeIn * (3 - 2 * fadeIn) * fadeOut * fadeOut * (3 - 2 * fadeOut);
-        const len = m.length * clamp(age / .25, 0, 1);
+        if (age > m.flight + m.trainLife) { meteors.splice(i, 1); continue; }
+        const travelledFor = Math.min(age, m.flight);
+        const px = m.x + travelledFor * m.vx, py = m.y + travelledFor * m.vy;
         ctx.save();
         ctx.globalCompositeOperation = "screen";
-        ctx.globalAlpha = clamp(envelope * m.bright, 0, 1);
         ctx.translate(px, py);
         ctx.rotate(Math.atan2(m.vy, m.vx));
-        const height = m.bright > 1.1 ? 19 : 15;
-        ctx.drawImage(meteorSprite(m.warm), -len, -height / 2, len, height);
+        const wakeLength = Math.min(m.wake, Math.hypot(m.vx, m.vy) * travelledFor);
+        if (wakeLength > 5) {
+          const afterFlight = Math.max(0, age - m.flight);
+          const persistence = age < m.flight ? clamp(age / .40, 0, 1) : Math.pow(clamp(1 - afterFlight / m.trainLife, 0, 1), 1.65);
+          ctx.globalAlpha = (m.fireball ? .65 : .26) * persistence * Math.min(1, m.bright);
+          const trainHeight = m.fireball ? 27 : 16;
+          ctx.drawImage(meteorSprite(m.tint, true), -wakeLength, -trainHeight / 2, wakeLength, trainHeight);
+        }
+        if (age < m.flight) {
+          const u = age / m.flight;
+          const inRamp = clamp(u / .13, 0, 1), outRamp = clamp((1 - u) / .17, 0, 1);
+          const flare = Math.exp(-Math.pow((u - m.flareAt) / (m.fireball ? .16 : .25), 2));
+          ctx.globalAlpha = clamp(m.bright * inRamp * outRamp * (.68 + (m.fireball ? .40 : .25) * flare), 0, 1);
+          const length = m.length * clamp(age / .23, 0, 1);
+          const height = m.fireball ? 23 : 17;
+          ctx.drawImage(meteorSprite(m.tint), -length, -height / 2, length, height);
+        }
         ctx.restore();
       }
 
