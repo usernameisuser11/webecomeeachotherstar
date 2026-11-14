@@ -212,6 +212,7 @@ function halo(ctx: CanvasRenderingContext2D, x: number, y: number, radius: numbe
 // these small sprites is substantially cheaper than making 4–6 gradients for
 // every meteor on every frame, especially on mobile Safari.
 const meteorSprites = new Map<string, HTMLCanvasElement>();
+const meteorHeads = new Map<MeteorTint, HTMLCanvasElement>();
 // Short quiet gaps make the brighter passes feel like actual events, while
 // two closely spaced pairs give the shower a brief natural crescendo.
 const SHOWER_BEATS = [.18, 1.35, 2.6, 3.84, 4.19, 5.6, 6.8, 8.35, 9.65, 10.1, 11.25, 12.65, 13.04, 14.6, 15.8, 17.2];
@@ -250,6 +251,28 @@ function meteorSprite(tint: MeteorTint, train = false) {
     g.beginPath(); g.arc(496, 28, 2.25, 0, TAU); g.fill();
   }
   meteorSprites.set(key, surface);
+  return surface;
+}
+
+// The leading point must retain a real pixel-sized white core. Drawing it
+// inside the 512px-long streak alone shrinks it to a subpixel on phones,
+// leaving a dull, headless line. Its optical halo is cached independently.
+function meteorHeadSprite(tint: MeteorTint) {
+  const cached = meteorHeads.get(tint);
+  if (cached) return cached;
+  const surface = document.createElement("canvas");
+  surface.width = 64; surface.height = 64;
+  const painter = surface.getContext("2d")!;
+  const glow = tint === "amber" ? "255,188,128" : tint === "mint" ? "155,244,224" : "169,213,255";
+  const haloLight = painter.createRadialGradient(32, 32, 0, 32, 32, 31);
+  haloLight.addColorStop(0, "rgba(255,255,255,1)");
+  haloLight.addColorStop(.055, "rgba(246,251,255,.98)");
+  haloLight.addColorStop(.16, `rgba(${glow},.52)`);
+  haloLight.addColorStop(.39, `rgba(${glow},.13)`);
+  haloLight.addColorStop(1, `rgba(${glow},0)`);
+  painter.fillStyle = haloLight;
+  painter.fillRect(0, 0, 64, 64);
+  meteorHeads.set(tint, surface);
   return surface;
 }
 
@@ -435,6 +458,7 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
     for (const tint of ["ice", "mint", "amber"] as const) {
       meteorSprite(tint);
       meteorSprite(tint, true);
+      meteorHeadSprite(tint);
     }
     let nextMeteor = 8;
     let seenShower = refs.current.showerKey;
@@ -598,10 +622,10 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
       meteors.push({
         x, y, vx: -speed * Math.cos(angle), vy: speed * Math.sin(angle),
         born: t,
-        length: Math.min(w * (fireball ? .46 : .34), (fireball ? 155 : 69) + random() * (fireball ? 90 : 74)),
-        wake: Math.min(w * (fireball ? .58 : .36), (fireball ? 194 : 80) + random() * 70),
+        length: Math.min(w * (fireball ? .54 : .38), (fireball ? 195 : 90) + random() * (fireball ? 115 : 105)),
+        wake: Math.min(w * (fireball ? .62 : .42), (fireball ? 225 : 115) + random() * 90),
         flight: fireball ? 1.22 + random() * .22 : .75 + random() * .35,
-        trainLife: fireball ? 1.35 + random() * .60 : .18 + random() * .19,
+        trainLife: fireball ? 1.45 + random() * .65 : .28 + random() * .23,
         bright, fireball, flareAt: .44 + random() * .28, tint,
       });
     }
@@ -689,6 +713,11 @@ export default function NightSky({ stars, glows, liveStarIds, myStarId, selected
           const length = m.length * clamp(age / .23, 0, 1);
           const height = m.fireball ? 23 : 17;
           ctx.drawImage(meteorSprite(m.tint), -length, -height / 2, length, height);
+          // Keep the star-white point visible at its actual screen size,
+          // independent of the tapered streak's stretched sprite texture.
+          const headSize = m.fireball ? 37 : 24;
+          ctx.globalAlpha = clamp(m.bright * inRamp * outRamp * (.76 + (m.fireball ? .45 : .18) * flare), 0, 1);
+          ctx.drawImage(meteorHeadSprite(m.tint), -headSize / 2, -headSize / 2, headSize, headSize);
         }
         ctx.restore();
       }
