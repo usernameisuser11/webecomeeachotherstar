@@ -147,55 +147,54 @@ function createAmbientLayers(w: number, h: number, dpr: number) {
   return layers;
 }
 
-// Star positions change only when the sky is refreshed. Work out the nearest
-// neighbours once instead of sorting all stars inside every animation frame.
+// Build small, open star-chart figures rather than a geometric network. In
+// particular, do not close polygons or draw every diagonal between nearby
+// stars: those shapes look like an exercise in counting diagonals, not a sky.
+// This is precomputed when the room's stars/viewport change, not per frame.
 function constellationLinks(stars: Star[], w: number, h: number): ConstellationLink[] {
   const links: ConstellationLink[] = [];
-  const seen = new Set<string>();
-  const addLink = (a: Star, b: Star, distSq: number) => {
-    if (distSq < 144) return;
-    const key = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    links.push({ a, b, distance: Math.sqrt(distSq), key });
+  const count = stars.length;
+  if (count < 2) return links;
+  const parent = Array.from({ length: count }, (_, i) => i);
+  const sizes = new Array<number>(count).fill(1);
+  const degree = new Array<number>(count).fill(0);
+  const find = (index: number): number => {
+    while (parent[index] !== index) { parent[index] = parent[parent[index]]; index = parent[index]; }
+    return index;
   };
-
-  if (stars.length <= 24) {
-    // A small shared sky must still form a constellation: the older near-
-    // neighbor cutoff left widely spaced memories completely disconnected.
-    // A minimum spanning tree keeps the shape open and avoids big triangles.
-    const visited = new Set<number>(stars.length ? [0] : []);
-    while (visited.size < stars.length) {
-      let first = -1, second = -1, best = Infinity;
-      for (const i of visited) for (let j = 0; j < stars.length; j++) {
-        if (visited.has(j)) continue;
-        const dx = (stars[i].x - stars[j].x) * w, dy = (stars[i].y - stars[j].y) * h;
-        const distSq = dx * dx + dy * dy;
-        if (distSq < best) { first = i; second = j; best = distSq; }
-      }
-      if (first < 0 || second < 0) break;
-      visited.add(second);
-      addLink(stars[first], stars[second], best);
+  const px = stars.map(s => s.x * w), py = stars.map(s => s.y * h);
+  const maxLength = Math.min(w, h) * (count < 5 ? .58 : count < 14 ? .43 : .32);
+  const minLengthSq = 14 * 14;
+  const candidates: { i: number; j: number; d2: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    for (let j = i + 1; j < count; j++) {
+      const dx = px[i] - px[j], dy = py[i] - py[j];
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= minLengthSq && d2 <= maxLength * maxLength) candidates.push({ i, j, d2 });
     }
-    return links;
   }
-
-  const limitSq = (Math.min(w, h) * .38) ** 2;
-  for (let i = 0; i < stars.length; i++) {
-    const a = stars[i];
-    let closest = -1, second = -1, d1 = Infinity, d2 = Infinity;
-    for (let j = 0; j < stars.length; j++) {
-      if (i === j) continue;
-      const b = stars[j];
-      const dx = (a.x - b.x) * w, dy = (a.y - b.y) * h;
-      const distSq = dx * dx + dy * dy;
-      if (distSq < d1) { second = closest; d2 = d1; closest = j; d1 = distSq; }
-      else if (distSq < d2) { second = j; d2 = distSq; }
-    }
-    for (const [index, distSq] of [[closest, d1], [second, d2]]) {
-      if (index < 0 || distSq > limitSq || distSq < 225) continue;
-      addLink(a, stars[index], distSq);
-    }
+  candidates.sort((a, b) => a.d2 - b.d2);
+  const chosen: { i: number; j: number }[] = [];
+  const orientation = (a: number, b: number, c: number) =>
+    (px[b] - px[a]) * (py[c] - py[a]) - (py[b] - py[a]) * (px[c] - px[a]);
+  for (const { i, j, d2 } of candidates) {
+    // Maximum two links per star, no closed polygons, and small groups of up
+    // to six stars. An isolated star can stay isolated until neighbours arrive.
+    const a = find(i), b = find(j);
+    if (a === b || degree[i] >= 2 || degree[j] >= 2 || sizes[a] + sizes[b] > 6) continue;
+    const crosses = chosen.some(edge => {
+      if (edge.i === i || edge.j === i || edge.i === j || edge.j === j) return false;
+      const p = orientation(i, j, edge.i), q = orientation(i, j, edge.j);
+      const r = orientation(edge.i, edge.j, i), s = orientation(edge.i, edge.j, j);
+      return p * q < 0 && r * s < 0;
+    });
+    if (crosses) continue;
+    parent[b] = a;
+    sizes[a] += sizes[b];
+    degree[i]++; degree[j]++;
+    chosen.push({ i, j });
+    const first = stars[i], second = stars[j];
+    links.push({ a: first, b: second, distance: Math.sqrt(d2), key: `${first.id}:${second.id}` });
   }
   return links;
 }
