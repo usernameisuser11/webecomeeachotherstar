@@ -17,6 +17,8 @@ const managedLinux = readExecutionProfile() === "managed-linux";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
+  durable_objects: { bindings: [{ name: "STARLIGHT_PRESENCE", class_name: "StarlightPresence" }] },
+  migrations: [{ tag: "starlight-presence-v1", new_sqlite_classes: ["StarlightPresence"] }],
   compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
     ? [
