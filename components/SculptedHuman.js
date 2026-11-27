@@ -124,7 +124,7 @@ let cache=null;
 function models(){
  if(cache)return cache;
  cache={
-  coat:armWeights(surface(jacketField(),[-.48,.31,-.26,.48,1.10,.23],.018)),
+  coat:armWeights(surface(jacketField(),[-.48,.26,-.26,.48,1.10,.23],.018)),
   hands:armWeights(surface(handField(),[-.4,.31,-.20,.4,.49,-.075],.009),true),
   head:surface(headField(),[-.175,.89,-.20,.175,1.32,.15],.009),
   hair:surface(hairField(),[-.17,1.03,-.15,.17,1.34,.18],.0078),
