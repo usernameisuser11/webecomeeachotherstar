@@ -27,10 +27,10 @@ export class StarlightPresence extends DurableObject {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const id = crypto.randomUUID();
-    const slots = Array.from({ length: MAX }, (_, i) => .14 + i * .10);
+    const slots = [.46, .54, .37, .63, .28, .72, .19, .81];
     const occupied = this.snapshot();
-    const x = slots.sort((a, b) => Math.min(1, ...occupied.map(p => Math.abs(b - p.x))) - Math.min(1, ...occupied.map(p => Math.abs(a - p.x))))[0];
-    const peer: Peer = { id, x, pose: "idle", hue: [187, 213, 263, 316, 38][crypto.getRandomValues(new Uint8Array(1))[0] % 5], waveUntil: 0, glowUntil: 0, last: 0 };
+    const x = slots.find(slot => occupied.every(p => Math.abs(p.x - slot) > .045)) ?? slots[occupied.length % MAX];
+    const peer: Peer = { id, x, pose: "sit", hue: [187, 213, 263, 316, 38][crypto.getRandomValues(new Uint8Array(1))[0] % 5], waveUntil: 0, glowUntil: 0, last: 0 };
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment(peer);
     server.send(JSON.stringify({ type: "welcome", id, serverTime: Date.now() }));
