@@ -10,12 +10,25 @@ function hash(x,z,s){let n=Math.imul(x,374761393)^Math.imul(z,668265263)^s;n=Mat
 function noise(x,z,s){let a=Math.floor(x),b=Math.floor(z),u=x-a,v=z-b;u=u*u*(3-2*u);v=v*v*(3-2*v);return (hash(a,b,s)*(1-u)+hash(a+1,b,s)*u)*(1-v)+(hash(a,b+1,s)*(1-u)+hash(a+1,b+1,s)*u)*v;}
 function fbm(x,z,s){let a=0,w=.52;for(let i=0;i<5;i++){a+=w*noise(x,z,s+i*37);x=x*1.91+3.2;z=z*2.03-1.7;w*=.48;}return a;}
 // Continuous grassy promontory, with an irregular bank descending into the lake.
+const WATER_LEVEL=-1.52;
+// The two banks follow different curves. Their spacing varies gently across
+// the valley, with a wider bend to one side and a narrower distant channel.
+function nearBank(x){
+ return -20.8+2.8*Math.cos(x*.094+.48)+1.15*Math.sin(x*.218)+(noise(x*.095,0,113)-.5)*2.4;
+}
+function farBank(x){
+ return -43.0+4.1*Math.sin(x*.071-.55)+1.7*Math.sin(x*.16+1.2)+(noise(x*.065,0,192)-.5)*2.2;
+}
 function ground(x,z){
-  const bank=-20.5+3.6*Math.cos(x*.12)+4.1*(noise(x*.085,0,113)-.5);
-  const t=clamp((z-bank)/8,0,1),shore=t*t*(3-2*t);
-  const broad=-.72+1.42*Math.exp(-Math.pow((z-3)/24,2));
-  const detail=.32*(fbm(x*.085,z*.085,39)-.5)+.065*Math.sin(x*.28+z*.17);
-  return -2.35+shore*(2.35+broad+detail);
+ const t=clamp((z-nearBank(x))/8.5,0,1),shore=t*t*(3-2*t);
+ const broad=-.72+1.42*Math.exp(-Math.pow((z-3)/24,2));
+ const detail=.32*(fbm(x*.085,z*.085,39)-.5)+.065*Math.sin(x*.28+z*.17);
+ return -2.35+shore*(2.35+broad+detail);
+}
+function distantBank(x,z){
+ const d=farBank(x)-z,t=clamp((d+2.2)/8.0,0,1),r=t*t*(3-2*t);
+ const terrain=.30+1.10*fbm(x*.10,z*.13,319)+.18*Math.sin(x*.18+z*.23);
+ return -2.2+r*(1.65+terrain);
 }
 const fogColor=new T.Color("#354c71");
 function meshTerrain(width,depth,segments,z0,height,low,high){
@@ -31,7 +44,8 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
     if(meadow){
       const worn=Math.exp(-Math.pow((z+3)/3.6,2))*Math.exp(-Math.pow(x/10,4));
       c.lerp(new T.Color("#586348"),worn*.22);
-      if(y<-.9)c.lerp(new T.Color("#494a3e"),clamp((-.9-y)*.7,0,.7));
+      const wet=1-clamp((y-WATER_LEVEL)/.85,0,1);
+      if(wet>0)c.lerp(new T.Color("#424b3d"),wet*.78);
     }
     col.push(c.r,c.g,c.b);
   }
@@ -140,44 +154,82 @@ function makeStars(rand){
 }
 // Live planar reflection. Only the distant landscape is drawn into this small
 // render target; it is regenerated on the GPU, never loaded from an image.
+// A continuous low riparian bank hides the far edge of the water mesh.
+function makeFarBank(){
+ const g=new T.PlaneGeometry(198,65,180,64);g.rotateX(-Math.PI/2);
+ const p=g.attributes.position,colors=[],wet=new T.Color("#343d39"),dry=new T.Color("#485a47"),dark=new T.Color("#283e3b");
+ for(let i=0;i<p.count;i++){
+  const x=p.getX(i),v=(p.getZ(i)+32.5)/65;
+  const z=farBank(x)+5-v*65,y=distantBank(x,z);
+  p.setXYZ(i,x,y,z);
+  const moisture=clamp((y-WATER_LEVEL)/.65,0,1);
+  const tone=wet.clone().lerp(dry,moisture*(.28+.72*fbm(x*.16,z*.14,49))).lerp(dark,clamp(v*1.2,0,.8));
+  colors.push(tone.r,tone.g,tone.b);
+ }
+ g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.computeVertexNormals();
+ const m=new T.Mesh(g,new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}));
+ m.layers.enable(1);return m;
+}
+// The water is a curving ribbon, not a rectangular plane extending to the horizon.
+function riverGeometry(small){
+ const nx=small?140:190,nz=small?23:34,p=[],uv=[],shore=[],idx=[];
+ for(let j=0;j<=nz;j++){
+  const t=j/nz;
+  for(let i=0;i<=nx;i++){
+   const u=i/nx,x=(u-.5)*194,near=nearBank(x)+6,far=farBank(x)-5;
+   const z=far+(near-far)*t;
+   const depth=Math.max(0,WATER_LEVEL-Math.max(ground(x,z),distantBank(x,z)));
+   p.push(x,z,0);uv.push(u,t);shore.push(clamp(depth/1.0,0,1));
+   if(i<nx&&j<nz){const k=j*(nx+1)+i;idx.push(k,k+1,k+nx+1,k+1,k+nx+2,k+nx+1);}
+  }
+ }
+ const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setAttribute("uv",new T.Float32BufferAttribute(uv,2));g.setAttribute("waterDepth",new T.Float32BufferAttribute(shore,1));g.setIndex(idx);g.computeVertexNormals();
+ return g;
+}
 function makeLake(small){
- const level=-1.52;
+ const level=WATER_LEVEL;
  const target=new T.WebGLRenderTarget(small?320:600,small?320:420,{minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true});
  const mirror=new T.PerspectiveCamera(),projection=new T.Matrix4(),direction=new T.Vector3(),focus=new T.Vector3();
  mirror.layers.set(1);
  const uniforms={time:{value:0},reflection:{value:target.texture},reflectionMatrix:{value:projection},reflectionReady:{value:0}};
  const mat=new T.ShaderMaterial({side:T.DoubleSide,uniforms,vertexShader:`
-  varying vec3 world;varying vec4 reflected;uniform mat4 reflectionMatrix;uniform float time;
+  attribute float waterDepth;varying float depthFade;varying vec3 world;varying vec4 reflected;uniform mat4 reflectionMatrix;uniform float time;
   void main(){
-   vec3 p=position;
-   p.z+=.008*sin(p.x*.70+p.y*.31+time*.47)+.006*sin(p.y*1.4-p.x*.35-time*.36);
+   vec3 p=position;depthFade=waterDepth;
+   p.z+=(.005*sin(p.x*.60+p.y*.26+time*.38)+.004*sin(p.y*1.15-p.x*.29-time*.30))*smoothstep(0.,.7,waterDepth);
    vec4 w=modelMatrix*vec4(p,1.);world=w.xyz;reflected=reflectionMatrix*w;
    gl_Position=projectionMatrix*viewMatrix*w;
   }`,fragmentShader:`
   precision highp float;
-  varying vec3 world;varying vec4 reflected;
+  varying float depthFade;varying vec3 world;varying vec4 reflected;
   uniform sampler2D reflection;uniform float time,reflectionReady;
   void main(){
    vec2 p=world.xz;
-   float a=sin(p.x*.43+p.y*1.60+time*.65+1.4*sin(p.x*.11+p.y*.23));
-   float b=sin(p.x*1.51-p.y*2.30-time*.48);
-   float c=sin(p.x*.75+p.y*3.4+time*.33+sin(p.x*.3));
+   float drift=sin(p.x*.15+p.y*.09);
+   float a=sin(p.x*.28+p.y*1.1+time*.38+1.45*drift);
+   float b=sin(p.x*.72-p.y*2.5-time*.32+sin(p.x*.19)*1.2);
+   float c=sin(p.x*.18+p.y*4.1+time*.21+sin(p.y*.16)*1.5);
+   float deep=smoothstep(.035,.95,depthFade);
    vec3 v=normalize(cameraPosition-world);
-   float fresnel=.23+.72*pow(1.-clamp(v.y,0.,1.),4.);
+   float fresnel=.16+.62*pow(1.-clamp(v.y,0.,1.),3.7);
    vec2 uv=reflected.xy/max(.0001,reflected.w)*.5+.5;
-   uv+=vec2((a*.0016+b*.0009),(.0025*a+.0011*c));
+   uv+=vec2(a*.0012+b*.0006,.0019*a+.0007*c)*deep;
    float inside=step(.001,uv.x)*step(uv.x,.999)*step(.001,uv.y)*step(uv.y,.999)*step(.0001,reflected.w);
    vec3 refl=texture2D(reflection,clamp(uv,vec2(.002),vec2(.998))).rgb;
-   vec3 base=mix(vec3(.012,.024,.038),vec3(.023,.042,.062),clamp(v.y,0.,1.));
-   vec3 color=mix(base,refl*vec3(.72,.83,.93),fresnel*reflectionReady*inside*.89);
-   float glint=pow(max(0.,a*.50+b*.32+c*.18),15.);
-   color+=vec3(.075,.12,.18)*glint*(.35+.65*fresnel);
+   vec3 shallow=vec3(.027,.042,.040),deepColor=vec3(.010,.024,.039);
+   vec3 base=mix(shallow,deepColor,deep);
+   float reflectionMix=fresnel*reflectionReady*inside*(.26+.48*deep);
+   vec3 color=mix(base,refl*vec3(.66,.77,.83),reflectionMix);
+   float glint=pow(max(0.,a*.48+b*.34+c*.18),17.);
+   color+=vec3(.055,.082,.105)*glint*deep*(.25+.75*fresnel);
+   float shoreline=exp(-pow((depthFade-.095)*12.,2.));
+   color+=vec3(.017,.025,.023)*shoreline*(.55+.45*a);
    gl_FragColor=vec4(color,1.);
    #include <tonemapping_fragment>
    #include <colorspace_fragment>
   }`});
- const mesh=new T.Mesh(new T.PlaneGeometry(160,130,65,48),mat);
- mesh.rotation.x=-Math.PI/2;mesh.position.set(0,level,-62);
+ const mesh=new T.Mesh(riverGeometry(small),mat);
+ mesh.rotation.x=Math.PI/2;mesh.position.set(0,level,0);
  let last=-Infinity,lastAspect=0;
  function reflect(renderer,scene,camera,ms){
   if(ms-last<220&&Math.abs(camera.aspect-lastAspect)<.01)return;
@@ -514,6 +566,7 @@ export function createLiveOverlook(){
  scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
  scene.add(meshTerrain(155,62,132,-60,mountainHeight(87,-61,17,15),"#1b313e","#456771"));
  for(const object of scene.children)if(object.isMesh||object.isLight)object.layers.enable(1);
+ scene.add(makeFarBank());
  const lake=makeLake(small);scene.add(lake.mesh);
  scene.add(meshTerrain(100,62,small?144:184,2,ground,"#344b3c","#637a50"));
  const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeGroundCover(scene,small);
