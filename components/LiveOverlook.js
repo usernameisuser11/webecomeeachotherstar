@@ -50,7 +50,7 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
      float detail=landNoise(landPos*3.1)*.65+landNoise(landPos*11.)*.35;
      diffuseColor.rgb*=.73+.34*broad+.19*detail;
    `);
-   if(meadow)shader.fragmentShader=shader.fragmentShader.replace("#include <roughnessmap_fragment>",`#include <roughnessmap_fragment>\n     float sod=landNoise(vec3(landPos.x*24.,0.,landPos.z*24.));\n     float moss=landNoise(vec3(landPos.x*.76,3.,landPos.z*.88));\n     diffuseColor.rgb*=mix(.81,1.15,sod)*mix(.90,1.08,moss);\n   `);
+   if(meadow)shader.fragmentShader=shader.fragmentShader.replace("#include <roughnessmap_fragment>",`#include <roughnessmap_fragment>\n     float sod=landNoise(vec3(landPos.x*24.,0.,landPos.z*24.));\n     float moss=landNoise(vec3(landPos.x*.76,3.,landPos.z*.88));\n     diffuseColor.rgb*=mix(.88,1.10,sod)*mix(.92,1.07,moss);\n     float turf=landNoise(vec3(landPos.x*9.,1.,landPos.z*13.));\n     diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.85,1.09,.84),smoothstep(.38,.73,turf)*.42);\n   `);
   };
   material.customProgramCacheKey=()=>meadow?"meadow-soil-v3":"natural-land-v2";
   return new T.Mesh(geo,material);
@@ -313,6 +313,41 @@ function makeMeadow(scene,rand,small){
  scene.add(stems,petals,centers);return wind;
 }
 // Low weathered rocks, embedded in the earth, with procedural mineral and moss colors.
+// Small broadleaf ground cover provides an organic transition from lawn to woodland.
+function makeGroundCover(scene,small){
+ const r=random(91401),positions=[],colors=[],indices=[];
+ const shadow=new T.Color("#344b35"),tip=new T.Color("#7a9261");
+ for(let frond=0;frond<7;frond++){
+  const a=frond*TAU/7+r()*.25,dx=Math.cos(a),dz=Math.sin(a),bx=-dz,bz=dx;
+  const len=.65+r()*.35;
+  for(let j=1;j<9;j++){
+   const t=j/9,mid= len*t,hy=.60*Math.sin(t*2.0);
+   const leafLen=(.12+.25*Math.sin(t*Math.PI))*len;
+   for(const sign of [-1,1]){
+    const x=dx*mid,z=dz*mid,w=.06*Math.sin(t*Math.PI),k=positions.length/3;
+    positions.push(x,hy,z,
+     x+bx*leafLen*sign*.48+dx*w,hy+.025,z+bz*leafLen*sign*.48+dz*w,
+     x+bx*leafLen*sign+dx*.11,hy-.035,z+bz*leafLen*sign+dz*.11,
+     x+bx*leafLen*sign*.48-dx*w,hy-.013,z+bz*leafLen*sign*.48-dz*w);
+    indices.push(k,k+1,k+2,k,k+2,k+3);
+    for(let i=0;i<4;i++){const c=shadow.clone().lerp(tip,i===2?.83:.38+r()*.26);colors.push(c.r,c.g,c.b);}
+   }
+  }
+ }
+ const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(positions,3));g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.setIndex(indices);g.computeVertexNormals();
+ const n=small?44:90,m=new T.InstancedMesh(g,new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}),n),o=new T.Object3D();
+ for(let i=0;i<n;i++){
+  let x=0,z=0,y=-3;
+  for(let k=0;k<20;k++){
+   x=(r()<.5?-1:1)*(6+r()*14);z=-17+r()*18;y=ground(x,z);
+   if(y>-.8&&fbm(x*.22,z*.19,781)>.46&&Math.abs(z+3)>2.2)break;
+  }
+  const size=.13+r()*.24;
+  o.position.set(x,y>-.8&&Math.abs(z+3)>2.2?y-.008:-20,z);o.rotation.set(0,r()*TAU,0);o.scale.set(size,size*(.52+r()*.22),size);o.updateMatrix();m.setMatrixAt(i,o.matrix);
+ }
+ scene.add(m);
+}
+
 function makeRocks(scene,rand){
  const r=random(23988),o=new T.Object3D(),dark=new T.Color("#414b49"),light=new T.Color("#77796a");
  for(let variant=0;variant<3;variant++){
@@ -478,10 +513,10 @@ export function createLiveOverlook(){
  scene.add(meshTerrain(240,112,180,-142,mountainHeight(11,-143,42,29),"#263953","#8496be"));
  scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
  scene.add(meshTerrain(155,62,132,-60,mountainHeight(87,-61,17,15),"#1b313e","#456771"));
- for(const object of scene.children)if(object.isMesh)object.layers.enable(1);
+ for(const object of scene.children)if(object.isMesh||object.isLight)object.layers.enable(1);
  const lake=makeLake(small);scene.add(lake.mesh);
  scene.add(meshTerrain(100,62,small?144:184,2,ground,"#344b3c","#637a50"));
- const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);
+ const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeGroundCover(scene,small);
  const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);
  for(const object of scene.children)if(!beforeForest.has(object))object.layers.enable(1);
  const tree=makeMemoryTree(scene,rand,small);const people=new Map();
