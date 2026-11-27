@@ -322,3 +322,9 @@ button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px so
   .topbar { padding-top:15px; }
 }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+
+/* Shared stargazing: the stars stay interactive, with a separate foreground. */
+.shared-starlight .star-index,.shared-starlight .bottom-annotation{display:none}
+.shared-starlight .scene-controls{bottom:calc(80px + env(safe-area-inset-bottom));}
+.starlight-seat-panel .scene-pill{min-height:34px;padding:6px 10px;font-size:11px;white-space:nowrap;}
+@media(max-width:600px){.shared-starlight .scene-controls{bottom:calc(78px + env(safe-area-inset-bottom));}.starlight-seat-panel .scene-pill{min-height:32px;padding:5px 7px;font-size:11px;}}
