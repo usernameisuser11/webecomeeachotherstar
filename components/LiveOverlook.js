@@ -161,6 +161,61 @@ function makeRocks(scene,rand){
   for(let i=0;i<55;i++){let x=(rand()-.5)*48,z=-16+rand()*30,r=.16+Math.pow(rand(),3)*1.1;if(Math.abs(z+3.0)<1.7)z+=2.8;o.position.set(x,ground(x,z)-.12,z);o.scale.set(r*1.5,r*.62,r);o.rotation.set(rand()*.4,rand()*TAU,rand()*.4);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);}
   scene.add(mesh);
 }
+// Volumetric woodland: tapered wood, uneven boughs and many individual needle blades.
+function makeWoodland(scene,rand,small){
+ const o=new T.Object3D(),Y=new T.Vector3(0,1,0);
+ const wood=[],twigs=[],needles=[];
+ const barkColors=["#403e43","#504447","#34373d"].map(x=>new T.Color(x));
+ const greenColors=["#355b58","#43655c","#587a67","#78917a"].map(x=>new T.Color(x));
+ const segment=(list,a,b,r,c)=>{
+  const d=b.clone().sub(a),length=d.length();
+  if(length<.001)return;
+  o.position.copy(a).addScaledVector(d,.5);o.quaternion.setFromUnitVectors(Y,d.normalize());o.scale.set(r,length,r);o.updateMatrix();list.push([o.matrix.clone(),c]);
+ };
+ const n=small?23:45;
+ for(let k=0;k<n;k++){
+  const side=k%2?1:-1,x=side*(4.5+Math.pow(rand(),1.35)*27),z=-9-rand()*19;
+  const y=ground(x,z),h=2.3+Math.pow(rand(),1.6)*4.4;
+  const base=new T.Vector3(x,y,z),tip=new T.Vector3(x+(rand()-.5)*.55,y+h,z+(rand()-.5)*.5);
+  segment(wood,base,tip,.065+h*.014,barkColors[k%3]);
+  const rings=6+Math.floor(rand()*5);
+  for(let j=0;j<rings;j++){
+   const t=.26+j/rings*.72,center=base.clone().lerp(tip,t);
+   const size=h*(.19*Math.pow(1-t,.72)+.023);
+   const count=4+Math.floor(rand()*3);
+   for(let q=0;q<count;q++){
+    const a=q*TAU/count+j*2.39+(rand()-.5)*.7;
+    const end=center.clone().add(new T.Vector3(Math.cos(a)*size*(.7+rand()*.65),-size*.15+rand()*.17,Math.sin(a)*size*(.7+rand()*.65)));
+    const bend=center.clone().lerp(end,.46).add(new T.Vector3(0,-size*.13,0));
+    segment(twigs,center,bend,.018+(1-t)*.021,barkColors[(k+j)%3]);segment(twigs,bend,end,.014,barkColors[k%3]);
+    const direction=end.clone().sub(center).normalize();
+    for(let l=0;l<4;l++){
+     const stem=bend.clone().lerp(end,(l+.25)/4);
+     const outward=new T.Vector3(-direction.z,0,direction.x).multiplyScalar((l%2?1:-1)*size*.18);
+     const e=stem.clone().add(outward).addScaledVector(direction,size*.17).add(new T.Vector3(0,.05+rand()*.09,0));
+     const d=e.clone().sub(stem);
+     o.position.copy(stem);o.quaternion.setFromUnitVectors(Y,d.clone().normalize());o.scale.set(size*.53,d.length()+size*.24,size*.53);o.updateMatrix();
+     needles.push([o.matrix.clone(),greenColors[Math.floor(rand()*greenColors.length)]]);
+    }
+   }
+  }
+ }
+ const twigGeo=new T.CylinderGeometry(.32,1,1,7,2);
+ const woodMat=new T.MeshStandardMaterial({color:"#ffffff",roughness:.99});
+ function inst(geo,mat,list){const m=new T.InstancedMesh(geo,mat,list.length);list.forEach(([matrix,c],i)=>{m.setMatrixAt(i,matrix);m.setColorAt(i,c);});m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true;scene.add(m);}
+ inst(twigGeo,woodMat,wood);inst(twigGeo,woodMat,twigs);
+ const positions=[],indices=[];
+ for(let j=0;j<38;j++){
+  const angle=j*2.399963,originY=.07+rand()*.80,len=.20+rand()*.37;
+  const dx=Math.cos(angle),dz=Math.sin(angle),bx=-dz*.014,bz=dx*.014;
+  const i=positions.length/3;
+  positions.push(-bx,originY,-bz,bx,originY,bz,dx*len*.53+bx*.55,originY+len*.18,dz*len*.53+bz*.55,dx*len,originY+len*.38,dz*len,dx*len*.53-bx*.55,originY+len*.18,dz*len*.53-bz*.55);
+  indices.push(i,i+1,i+2,i,i+2,i+4,i+4,i+2,i+3);
+ }
+ const leaf=new T.BufferGeometry();leaf.setAttribute("position",new T.Float32BufferAttribute(positions,3));leaf.setIndex(indices);leaf.computeVertexNormals();
+ inst(leaf,new T.MeshStandardMaterial({color:"#ffffff",side:T.DoubleSide,roughness:1}),needles);
+}
+
 function makeMemoryTree(scene,rand,small){
  const group=new T.Group();const x=small?-3.2:-7.0,z=-11.6;group.position.set(x,ground(x,z),z);
  const bark=new T.MeshStandardMaterial({color:"#4b404b",roughness:.98});
@@ -199,7 +254,7 @@ export function createLiveOverlook(){
  scene.add(meshTerrain(135,53,112,-58,mountainHeight(87,-60,14,12),"#1b313e","#456771"));
  const lake=makeLake();scene.add(lake);
  scene.add(meshTerrain(100,62,108,2,ground,"#253f40","#69865c"));
- const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);
+ const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeWoodland(scene,rand,small);
  const tree=makeMemoryTree(scene,rand,small);const people=new Map();
  let w=0,h=0,last=-Infinity,dead=false;
  const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
