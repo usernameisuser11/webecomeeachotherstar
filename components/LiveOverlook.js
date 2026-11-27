@@ -50,8 +50,9 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
      float detail=landNoise(landPos*3.1)*.65+landNoise(landPos*11.)*.35;
      diffuseColor.rgb*=.73+.34*broad+.19*detail;
    `);
+   if(meadow)shader.fragmentShader=shader.fragmentShader.replace("#include <roughnessmap_fragment>",`#include <roughnessmap_fragment>\n     float sod=landNoise(vec3(landPos.x*24.,0.,landPos.z*24.));\n     float moss=landNoise(vec3(landPos.x*.76,3.,landPos.z*.88));\n     diffuseColor.rgb*=mix(.81,1.15,sod)*mix(.90,1.08,moss);\n   `);
   };
-  material.customProgramCacheKey=()=>"natural-land-v2";
+  material.customProgramCacheKey=()=>meadow?"meadow-soil-v3":"natural-land-v2";
   return new T.Mesh(geo,material);
 }
 // Each range has its own asymmetric ridge profile, with a broad central valley.
@@ -264,89 +265,145 @@ function makeMeadow(scene,rand,small){
  }
  scene.add(stems,petals,centers);return wind;
 }
+// Low weathered rocks, embedded in the earth, with procedural mineral and moss colors.
 function makeRocks(scene,rand){
-  const geo=new T.IcosahedronGeometry(1,2),p=geo.attributes.position;
-  for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),k=.83+.25*fbm(x*3,z*3+y,82);p.setXYZ(i,x*k,y*k,z*k);}
-  geo.computeVertexNormals();const mesh=new T.InstancedMesh(geo,new T.MeshStandardMaterial({color:"#67737b",roughness:.98}),55),o=new T.Object3D();
-  for(let i=0;i<55;i++){let x=(rand()-.5)*48,z=-16+rand()*30,r=.16+Math.pow(rand(),3)*1.1;if(Math.abs(z+3.0)<1.7)z+=2.8;o.position.set(x,ground(x,z)-.12,z);o.scale.set(r*1.5,r*.62,r);o.rotation.set(rand()*.4,rand()*TAU,rand()*.4);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);}
+ const r=random(23988),o=new T.Object3D(),dark=new T.Color("#414b49"),light=new T.Color("#77796a");
+ for(let variant=0;variant<3;variant++){
+  const geo=new T.IcosahedronGeometry(1,3),p=geo.attributes.position;
+  for(let i=0;i<p.count;i++){
+   const x=p.getX(i),y=p.getY(i),z=p.getZ(i),k=.77+.35*fbm(x*2.2+variant*3,z*2.1+y,82+variant);
+   p.setXYZ(i,x*k+.09*y*y,y*k,z*k+.13*x*y);
+  }
+  geo.computeVertexNormals();
+  const mesh=new T.InstancedMesh(geo,new T.MeshStandardMaterial({color:"#ffffff",roughness:1}),12);
+  for(let i=0;i<12;i++){
+   let x=(r()-.5)*45,z=-19+r()*25;
+   if(Math.abs(z+3)<3&&Math.abs(x)<13)z-=4;
+   const y=ground(x,z),radius=.09+Math.pow(r(),2.8)*.68;
+   o.position.set(x,y<-.95?-20:y-.07,z);o.scale.set(radius*(1.3+r()*.5),radius*.43,radius*(.8+r()*.3));
+   o.rotation.set(r()*.4,r()*TAU,r()*.4);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);mesh.setColorAt(i,dark.clone().lerp(light,r()*.85));
+  }
   scene.add(mesh);
+ }
 }
-// Volumetric woodland: tapered wood, uneven boughs and many individual needle blades.
+// Curved, tapering branches use a varying cross section, not stacked cylinders.
+// A single merged mesh per woodland reduces draw calls and joint seams.
+function addBranch(buffer,curve,r0,r1,steps,sides,color,seed){
+ const frames=curve.computeFrenetFrames(steps,false);
+ const offset=buffer.p.length/3;
+ for(let i=0;i<=steps;i++){
+  const t=i/steps,c=curve.getPointAt(t),r=r0*Math.pow(1-t,.82)+r1*t;
+  const n=frames.normals[i],b=frames.binormals[i];
+  for(let j=0;j<sides;j++){
+   const angle=j/sides*TAU,k=1+.12*Math.sin(angle*3+t*9+seed)+.045*Math.sin(angle*5-t*17);
+   const q=c.clone().addScaledVector(n,Math.cos(angle)*r*k).addScaledVector(b,Math.sin(angle)*r*k);
+   buffer.p.push(q.x,q.y,q.z);
+   const shade=.73+.23*Math.sin(angle*3+seed)*Math.sin(angle*3+seed)+.12*t;
+   buffer.c.push(color.r*shade,color.g*shade,color.b*shade);
+   if(i<steps){const a=offset+i*sides+j,e=offset+i*sides+(j+1)%sides;buffer.i.push(a,e,a+sides,e,e+sides,a+sides);}
+  }
+ }
+}
+function branchMesh(data){
+ const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(data.p,3));g.setAttribute("color",new T.Float32BufferAttribute(data.c,3));g.setIndex(data.i);g.computeVertexNormals();
+ return new T.Mesh(g,new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}));
+}
+function curveOf(a,b,c){return new T.CatmullRomCurve3([a,b,c]);}
 function makeWoodland(scene,rand,small){
- const o=new T.Object3D(),Y=new T.Vector3(0,1,0);
- const wood=[],twigs=[],needles=[];
- const barkColors=["#403e43","#504447","#34373d"].map(x=>new T.Color(x));
- const greenColors=["#355b58","#43655c","#587a67","#78917a"].map(x=>new T.Color(x));
- const segment=(list,a,b,r,c)=>{
-  const d=b.clone().sub(a),length=d.length();
-  if(length<.001)return;
-  o.position.copy(a).addScaledVector(d,.5);o.quaternion.setFromUnitVectors(Y,d.normalize());o.scale.set(r,length,r);o.updateMatrix();list.push([o.matrix.clone(),c]);
- };
- const n=small?23:45;
+ const r=random(839127),data={p:[],c:[],i:[]},foliage=[],o=new T.Object3D(),Y=new T.Vector3(0,1,0);
+ const bark=new T.Color("#48403c"),greens=["#294a43","#365a4d","#446754","#58755d"].map(v=>new T.Color(v));
+ const n=small?16:31;
  for(let k=0;k<n;k++){
-  const side=k%2?1:-1,x=side*(4.5+Math.pow(rand(),1.35)*27),z=-9-rand()*19;
-  const y=ground(x,z),h=2.3+Math.pow(rand(),1.6)*4.4;
-  const base=new T.Vector3(x,y,z),tip=new T.Vector3(x+(rand()-.5)*.55,y+h,z+(rand()-.5)*.5);
-  segment(wood,base,tip,.065+h*.014,barkColors[k%3]);
-  const rings=6+Math.floor(rand()*5);
+  const side=k%2?1:-1,x=side*(5.7+Math.pow(r(),1.2)*24),z=-10-r()*10.5;
+  const y=ground(x,z);if(y<-.8)continue;
+  const height=1.8+Math.pow(r(),1.6)*3.4,lean=(r()-.5)*height*.12;
+  const a=new T.Vector3(x,y,z),b=new T.Vector3(x+lean*.4,y+height*.46,z+.12),c=new T.Vector3(x+lean,y+height,z+(r()-.5)*.28);
+  const trunk=curveOf(a,b,c);
+  addBranch(data,trunk,.045+height*.021,.012,11,8,bark,k);
+  const rings=6+Math.floor(r()*4);
   for(let j=0;j<rings;j++){
-   const t=.26+j/rings*.72,center=base.clone().lerp(tip,t);
-   const size=h*(.19*Math.pow(1-t,.72)+.023);
-   const count=4+Math.floor(rand()*3);
+   const t=.24+j/(rings-1)*.68,center=trunk.getPointAt(t),length=height*(.255*Math.pow(1-t,.75)+.015);
+   const count=3+Math.floor(r()*3);
    for(let q=0;q<count;q++){
-    const a=q*TAU/count+j*2.39+(rand()-.5)*.7;
-    const end=center.clone().add(new T.Vector3(Math.cos(a)*size*(.7+rand()*.65),-size*.15+rand()*.17,Math.sin(a)*size*(.7+rand()*.65)));
-    const bend=center.clone().lerp(end,.46).add(new T.Vector3(0,-size*.13,0));
-    segment(twigs,center,bend,.018+(1-t)*.021,barkColors[(k+j)%3]);segment(twigs,bend,end,.014,barkColors[k%3]);
-    const direction=end.clone().sub(center).normalize();
-    for(let l=0;l<4;l++){
-     const stem=bend.clone().lerp(end,(l+.25)/4);
-     const outward=new T.Vector3(-direction.z,0,direction.x).multiplyScalar((l%2?1:-1)*size*.18);
-     const e=stem.clone().add(outward).addScaledVector(direction,size*.17).add(new T.Vector3(0,.05+rand()*.09,0));
-     const d=e.clone().sub(stem);
-     o.position.copy(stem);o.quaternion.setFromUnitVectors(Y,d.clone().normalize());o.scale.set(size*.53,d.length()+size*.24,size*.53);o.updateMatrix();
-     needles.push([o.matrix.clone(),greenColors[Math.floor(rand()*greenColors.length)]]);
+    const angle=q*TAU/count+j*2.39996+r()*.68;
+    const dx=Math.cos(angle),dz=Math.sin(angle),L=length*(.7+r()*.52);
+    const middle=center.clone().add(new T.Vector3(dx*L*.54,-L*.17,dz*L*.54));
+    const end=center.clone().add(new T.Vector3(dx*L,L*(.02+r()*.15),dz*L));
+    const limb=curveOf(center,middle,end);addBranch(data,limb,.012+L*.023,.003,5,5,bark,j+q);
+    for(let m=0;m<4;m++){
+     const base=limb.getPointAt(.35+m*.17);
+     const dir=new T.Vector3(dx+(-1)**m*dz*.6,.32+r()*.37,dz-(-1)**m*dx*.6).normalize();
+     o.position.copy(base);o.quaternion.setFromUnitVectors(Y,dir);o.scale.set(L*.64,L*.74,L*.64);o.updateMatrix();
+     foliage.push([o.matrix.clone(),greens[Math.floor(r()*greens.length)]]);
     }
    }
   }
  }
- const twigGeo=new T.CylinderGeometry(.32,1,1,7,2);
- const woodMat=new T.MeshStandardMaterial({color:"#ffffff",roughness:.99});
- function inst(geo,mat,list){const m=new T.InstancedMesh(geo,mat,list.length);list.forEach(([matrix,c],i)=>{m.setMatrixAt(i,matrix);m.setColorAt(i,c);});m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true;scene.add(m);}
- inst(twigGeo,woodMat,wood);inst(twigGeo,woodMat,twigs);
- const positions=[],indices=[];
- for(let j=0;j<38;j++){
-  const angle=j*2.399963,originY=.07+rand()*.80,len=.20+rand()*.37;
-  const dx=Math.cos(angle),dz=Math.sin(angle),bx=-dz*.014,bz=dx*.014;
-  const i=positions.length/3;
-  positions.push(-bx,originY,-bz,bx,originY,bz,dx*len*.53+bx*.55,originY+len*.18,dz*len*.53+bz*.55,dx*len,originY+len*.38,dz*len,dx*len*.53-bx*.55,originY+len*.18,dz*len*.53-bz*.55);
-  indices.push(i,i+1,i+2,i,i+2,i+4,i+4,i+2,i+3);
+ scene.add(branchMesh(data));
+ // Real curved needles, distributed along individual shoots, never image cards.
+ const p=[],idx=[];
+ for(let i=0;i<30;i++){
+  const a=i*2.399963,dy=.06+i/30*.78,dx=Math.cos(a),dz=Math.sin(a);
+  const len=(.29+.22*r())*(1-.43*dy),w=.013+r()*.009,bx=-dz*w,bz=dx*w;
+  const b=p.length/3;
+  p.push(-bx,dy,-bz,bx,dy,bz,dx*len*.5+bx*.6,dy+len*.21,dz*len*.5+bz*.6,dx*len,dy+len*.36,dz*len,dx*len*.5-bx*.6,dy+len*.21,dz*len*.5-bz*.6);
+  idx.push(b,b+1,b+2,b,b+2,b+4,b+4,b+2,b+3);
  }
- const leaf=new T.BufferGeometry();leaf.setAttribute("position",new T.Float32BufferAttribute(positions,3));leaf.setIndex(indices);leaf.computeVertexNormals();
- inst(leaf,new T.MeshStandardMaterial({color:"#ffffff",side:T.DoubleSide,roughness:1}),needles);
+ const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setIndex(idx);g.computeVertexNormals();
+ const mesh=new T.InstancedMesh(g,new T.MeshStandardMaterial({color:"#ffffff",side:T.DoubleSide,roughness:.96}),foliage.length);
+ foliage.forEach(([matrix,color],i)=>{mesh.setMatrixAt(i,matrix);mesh.setColorAt(i,color);});
+ scene.add(mesh);
 }
-
 function makeMemoryTree(scene,rand,small){
- const group=new T.Group();const x=small?-3.2:-7.0,z=-11.6;group.position.set(x,ground(x,z),z);
- const bark=new T.MeshStandardMaterial({color:"#4b404b",roughness:.98});
- const tips=[];
- function branch(start,dir,len,r,depth){
-   const end=start.clone().addScaledVector(dir,len);
-   const mid=start.clone().lerp(end,.53).add(new T.Vector3((rand()-.5)*len*.23,0,(rand()-.5)*len*.25));
-   const curve=new T.CatmullRomCurve3([start,mid,end]);const g=new T.TubeGeometry(curve,8,r,6,false);group.add(new T.Mesh(g,bark));
-   if(depth===0){tips.push(end);return;}
-   const count=depth===4?4:2;
-   for(let i=0;i<count;i++){const ang=rand()*TAU+i*2.4;const child=dir.clone().multiplyScalar(.46).add(new T.Vector3(Math.cos(ang)*.69,.45+rand()*.30,Math.sin(ang)*.69)).normalize();branch(end,child,len*(.57+rand()*.17),r*.58,depth-1);}
+ const r=random(193781),group=new T.Group(),data={p:[],c:[],i:[]};
+ const x=small?-3.8:-7.8,z=-10.8;group.position.set(x,ground(x,z),z);
+ const bark=new T.Color("#64524b"),twigs=[],canopy=[];
+ const root=new T.Vector3(0,0,0),baseTip=new T.Vector3(.12,2.65,-.10);
+ const trunk=curveOf(root,new T.Vector3(-.17,1.35,.12),baseTip);
+ addBranch(data,trunk,.255,.065,18,12,bark,1);
+ // Flared roots blend into the ground instead of the trunk ending at a flat disk.
+ for(let i=0;i<6;i++){
+  const a=i*TAU/6+r()*.35,len=.47+r()*.34;
+  const end=new T.Vector3(Math.cos(a)*len,-.05,Math.sin(a)*len);
+  addBranch(data,curveOf(new T.Vector3(0,.19,0),end.clone().multiplyScalar(.5).add(new T.Vector3(0,.035,0)),end),.095,.008,7,7,bark,i);
  }
- branch(new T.Vector3(),new T.Vector3(.04,1,.02).normalize(),2.15,.18,4);
- const leafGeo=new T.BufferGeometry();
- const lp=[],li=[];for(let i=0;i<=8;i++){const t=i/8,w=.047*Math.sin(t*Math.PI)**.72,y=(t-.5)*.145;
- lp.push(-w,y,.013*Math.sin(t*Math.PI),0,y,.031*Math.sin(t*Math.PI),w,y,.013*Math.sin(t*Math.PI));
- if(i<8){const a=i*3;li.push(a,a+1,a+3,a+1,a+4,a+3,a+1,a+2,a+4,a+2,a+5,a+4);}}
- leafGeo.setAttribute("position",new T.Float32BufferAttribute(lp,3));leafGeo.setIndex(li);leafGeo.computeVertexNormals();
- const mat=new T.MeshStandardMaterial({color:"#81b5a4",emissive:"#3e9b94",emissiveIntensity:.4,roughness:.84,side:T.DoubleSide});
- const leaves=new T.InstancedMesh(leafGeo,mat,tips.length*70),o=new T.Object3D();
- let k=0;for(const tip of tips){for(let i=0;i<70;i++){o.position.copy(tip).add(new T.Vector3((rand()-.5)*.9,(rand()-.5)*.72,(rand()-.5)*.9));o.rotation.set(rand()*2,rand()*TAU,rand()*2);o.scale.set(.8+rand()*.9,.8+rand()*.7,.8+rand()*.8);o.updateMatrix();leaves.setMatrixAt(k++,o.matrix);}}
+ function grow(a,d,len,rad,depth){
+  const end=a.clone().addScaledVector(d,len),mid=a.clone().lerp(end,.47).add(new T.Vector3((r()-.5)*len*.22,-len*.07,(r()-.5)*len*.22));
+  const curve=curveOf(a,mid,end);
+  addBranch(data,curve,rad,rad*.31,depth>1?8:5,depth>1?7:5,bark,r()*TAU);
+  if(depth<1){twigs.push(curve);canopy.push(end);return;}
+  const n=depth===3?3:2;
+  for(let j=0;j<n;j++){
+   const angle=r()*TAU+j*2.39996,child=d.clone().multiplyScalar(.48).add(new T.Vector3(Math.cos(angle)*.61,.22+r()*.36,Math.sin(angle)*.61)).normalize();
+   grow(curve.getPointAt(.68+r()*.30),child,len*(.58+r()*.19),rad*.48,depth-1);
+  }
+ }
+ for(let i=0;i<6;i++){
+  const t=.43+i*.102,a=trunk.getPointAt(t),angle=i*2.399963+.3;
+  grow(a,new T.Vector3(Math.cos(angle)*.82,.56+r()*.31,Math.sin(angle)*.82).normalize(),1.0+r()*.6,.095*(1-t*.5),3);
+ }
+ grow(baseTip,new T.Vector3(.06,1,.02),.95,.055,2);
+ group.add(branchMesh(data));
+ const leafGeo=new T.BufferGeometry(),lp=[],li=[],lc=[];
+ for(let i=0;i<=8;i++){
+  const t=i/8,w=.048*Math.sin(t*Math.PI)**.77,y=(t-.5)*.16;
+  lp.push(-w,y,.011*Math.sin(t*Math.PI),0,y,.024*Math.sin(t*Math.PI),w,y,.011*Math.sin(t*Math.PI));
+  lc.push(.72,.78,.72,.95,1,.93,.78,.84,.78);
+  if(i<8){const a=i*3;li.push(a,a+1,a+3,a+1,a+4,a+3,a+1,a+2,a+4,a+2,a+5,a+4);}
+ }
+ leafGeo.setAttribute("position",new T.Float32BufferAttribute(lp,3));leafGeo.setAttribute("color",new T.Float32BufferAttribute(lc,3));leafGeo.setIndex(li);leafGeo.computeVertexNormals();
+ const mat=new T.MeshStandardMaterial({color:"#ffffff",vertexColors:true,emissive:"#407d72",emissiveIntensity:.30,roughness:.85,side:T.DoubleSide});
+ const each=small?18:29,leaves=new T.InstancedMesh(leafGeo,mat,twigs.length*each),o=new T.Object3D();
+ const a=new T.Color("#486b59"),b=new T.Color("#94b49a"),Y=new T.Vector3(0,1,0);
+ let k=0;
+ for(const twig of twigs){
+  for(let i=0;i<each;i++){
+   const t=.23+r()*.77,origin=twig.getPointAt(t),angle=i*2.399963;
+   const d=new T.Vector3(Math.cos(angle),.20+r()*.55,Math.sin(angle)).normalize();
+   o.position.copy(origin).addScaledVector(d,.06+r()*.12);o.quaternion.setFromUnitVectors(Y,d);o.rotateY(r()*.9);
+   const scale=.62+r()*.68;o.scale.set(scale,scale,scale);o.updateMatrix();leaves.setMatrixAt(k,o.matrix);leaves.setColorAt(k++,a.clone().lerp(b,r()));
+  }
+ }
  group.add(leaves);scene.add(group);return {group,mat,leaves};
 }
 function contactShadow(radiusX,radiusZ,strength){
