@@ -155,15 +155,18 @@ function makeStars(rand){
 // Live planar reflection. Only the distant landscape is drawn into this small
 // render target; it is regenerated on the GPU, never loaded from an image.
 // A continuous low riparian bank hides the far edge of the water mesh.
+function smoothstepLocal(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
 function makeFarBank(){
  const g=new T.PlaneGeometry(198,65,180,64);g.rotateX(-Math.PI/2);
  const p=g.attributes.position,colors=[],wet=new T.Color("#343d39"),dry=new T.Color("#485a47"),dark=new T.Color("#283e3b");
  for(let i=0;i<p.count;i++){
   const x=p.getX(i),v=(p.getZ(i)+32.5)/65;
-  const z=farBank(x)+5-v*65,y=distantBank(x,z);
+  const z=farBank(x)-60+v*65,y=distantBank(x,z);
   p.setXYZ(i,x,y,z);
   const moisture=clamp((y-WATER_LEVEL)/.65,0,1);
-  const tone=wet.clone().lerp(dry,moisture*(.28+.72*fbm(x*.16,z*.14,49))).lerp(dark,clamp(v*1.2,0,.8));
+  const grain=fbm(x*.23,z*.19,49),silt=1-smoothstepLocal(.08,.55,y-WATER_LEVEL);
+  const tone=wet.clone().lerp(dry,moisture*(.28+.72*grain)).lerp(dark,clamp((1-v)*1.2,0,.8));
+  tone.lerp(new T.Color("#696457"),silt*(.12+.15*grain));
   colors.push(tone.r,tone.g,tone.b);
  }
  g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.computeVertexNormals();
@@ -191,7 +194,7 @@ function makeLake(small){
  const target=new T.WebGLRenderTarget(small?320:600,small?320:420,{minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true});
  const mirror=new T.PerspectiveCamera(),projection=new T.Matrix4(),direction=new T.Vector3(),focus=new T.Vector3();
  mirror.layers.set(1);
- const uniforms={time:{value:0},reflection:{value:target.texture},reflectionMatrix:{value:projection},reflectionReady:{value:0}};
+ const uniforms={time:{value:0},reflection:{value:target.texture},reflectionMatrix:{value:projection},reflectionReady:{value:0},riverFog:{value:fogColor}};
  const mat=new T.ShaderMaterial({side:T.DoubleSide,uniforms,vertexShader:`
   attribute float waterDepth;varying float depthFade;varying vec3 world;varying vec4 reflected;uniform mat4 reflectionMatrix;uniform float time;
   void main(){
@@ -202,7 +205,7 @@ function makeLake(small){
   }`,fragmentShader:`
   precision highp float;
   varying float depthFade;varying vec3 world;varying vec4 reflected;
-  uniform sampler2D reflection;uniform float time,reflectionReady;
+  uniform sampler2D reflection;uniform float time,reflectionReady;uniform vec3 riverFog;
   void main(){
    vec2 p=world.xz;
    float drift=sin(p.x*.15+p.y*.09);
@@ -215,15 +218,22 @@ function makeLake(small){
    vec2 uv=reflected.xy/max(.0001,reflected.w)*.5+.5;
    uv+=vec2(a*.0012+b*.0006,.0019*a+.0007*c)*deep;
    float inside=step(.001,uv.x)*step(uv.x,.999)*step(.001,uv.y)*step(uv.y,.999)*step(.0001,reflected.w);
-   vec3 refl=texture2D(reflection,clamp(uv,vec2(.002),vec2(.998))).rgb;
+   vec2 sampleUV=clamp(uv,vec2(.005),vec2(.995));
+   vec3 refl=texture2D(reflection,sampleUV).rgb*.62;
+   refl+=texture2D(reflection,sampleUV+vec2(.0018,.0023)).rgb*.19;
+   refl+=texture2D(reflection,sampleUV-vec2(.0018,.0023)).rgb*.19;
    vec3 shallow=vec3(.027,.042,.040),deepColor=vec3(.010,.024,.039);
    vec3 base=mix(shallow,deepColor,deep);
-   float reflectionMix=fresnel*reflectionReady*inside*(.26+.48*deep);
+   float reflectionMix=fresnel*reflectionReady*inside*(.20+.43*deep);
    vec3 color=mix(base,refl*vec3(.66,.77,.83),reflectionMix);
    float glint=pow(max(0.,a*.48+b*.34+c*.18),17.);
    color+=vec3(.055,.082,.105)*glint*deep*(.25+.75*fresnel);
-   float shoreline=exp(-pow((depthFade-.095)*12.,2.));
-   color+=vec3(.017,.025,.023)*shoreline*(.55+.45*a);
+   float shoreline=exp(-pow((depthFade-.075)*17.,2.));
+   float brokenEdge=smoothstep(.0,.8,.5+.5*sin(p.x*1.7+sin(p.x*.42+p.y)*2.6));
+   color+=vec3(.009,.014,.013)*shoreline*brokenEdge*(.65+.35*a);
+   // Match distant water to the same atmosphere as the adjacent terrain.
+   float dist=length(cameraPosition-world),haze=1.-exp(-dist*dist*.000081);
+   color=mix(color,riverFog,haze*.58);
    gl_FragColor=vec4(color,1.);
    #include <tonemapping_fragment>
    #include <colorspace_fragment>
@@ -366,6 +376,43 @@ function makeMeadow(scene,rand,small){
 }
 // Low weathered rocks, embedded in the earth, with procedural mineral and moss colors.
 // Small broadleaf ground cover provides an organic transition from lawn to woodland.
+// Riparian detail follows the actual water height rather than a straight strip.
+function makeRiverEdges(scene,small){
+ const r=random(70061),o=new T.Object3D();
+ function shoreAt(x,far){
+  const base=far?farBank(x):nearBank(x);
+  let lo=base-6,hi=base+9;
+  const height=far?distantBank:ground;
+  for(let i=0;i<13;i++){
+   const z=(lo+hi)*.5;
+   if((height(x,z)>WATER_LEVEL)===far)lo=z;else hi=z;
+  }
+  return (lo+hi)*.5;
+ }
+ const n=small?160:300,reed=new T.InstancedMesh(tuftGeometry(927,6,5),new T.MeshStandardMaterial({color:"#ffffff",vertexColors:true,roughness:1,side:T.DoubleSide}),n);
+ const a=new T.Color("#465444"),b=new T.Color("#6d7852");
+ for(let i=0;i<n;i++){
+  const far=i%3!==0;
+  let x=(r()-.5)*(far?140:55);
+  for(let j=0;j<5&&fbm(x*.25,far?4:1,781)<.47;j++)x=(r()-.5)*(far?140:55);
+  const z=shoreAt(x,far)+(far?-1:1)*(.35+Math.pow(r(),2)*1.3),y=(far?distantBank:ground)(x,z);
+  const h=.12+Math.pow(r(),2)*.23;
+  o.position.set(x,y-.015,z);o.rotation.set(0,r()*TAU,0);o.scale.set(h*.86,h,h*.86);o.updateMatrix();reed.setMatrixAt(i,o.matrix);reed.setColorAt(i,a.clone().lerp(b,r()*.9));
+ }
+ scene.add(reed);
+ const stoneGeo=new T.IcosahedronGeometry(1,2),p=stoneGeo.attributes.position;
+ for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),m=.78+.27*fbm(x*3,z*3+y,294);p.setXYZ(i,x*m,y*m,z*m);}
+ stoneGeo.computeVertexNormals();
+ const count=small?90:180,stones=new T.InstancedMesh(stoneGeo,new T.MeshStandardMaterial({color:"#ffffff",roughness:.98}),count);
+ const c=new T.Color("#50574c"),d=new T.Color("#7b7566");
+ for(let i=0;i<count;i++){
+  const x=(r()-.5)*60,far=i%4===0,z=shoreAt(x,far)+(far?-1:1)*(.13+r()*.9);
+  const y=(far?distantBank:ground)(x,z),radius=.035+Math.pow(r(),3)*.18;
+  o.position.set(x,y-.025,z);o.rotation.set(r()*.28,r()*TAU,r()*.2);o.scale.set(radius*1.3,radius*.42,radius*.9);o.updateMatrix();stones.setMatrixAt(i,o.matrix);stones.setColorAt(i,c.clone().lerp(d,r()));
+ }
+ scene.add(stones);
+}
+
 function makeGroundCover(scene,small){
  const r=random(91401),positions=[],colors=[],indices=[];
  const shadow=new T.Color("#344b35"),tip=new T.Color("#7a9261");
@@ -569,7 +616,7 @@ export function createLiveOverlook(){
  scene.add(makeFarBank());
  const lake=makeLake(small);scene.add(lake.mesh);
  scene.add(meshTerrain(100,62,small?144:184,2,ground,"#344b3c","#637a50"));
- const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeGroundCover(scene,small);
+ const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeGroundCover(scene,small);makeRiverEdges(scene,small);
  const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);
  for(const object of scene.children)if(!beforeForest.has(object))object.layers.enable(1);
  const tree=makeMemoryTree(scene,rand,small);const people=new Map();
