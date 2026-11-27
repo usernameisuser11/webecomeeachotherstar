@@ -64,8 +64,8 @@ export default function StarlightWalk({ canvasRef, paused, onLeave }: Props) {
       raf = requestAnimationFrame(frame);
       if (t - last < 1000 / 30 || !w || !h) return;
       last = t; ctx!.clearRect(0, 0, w, h);
-      const g = ctx!, base = h * (w < 600 ? .84 : .86);
-      const unit = Math.min(w / 440, h / 700, 1.25);
+      const g = ctx!, base = h * (w < 600 ? .78 : .84);
+      const unit = Math.min(w / 365, h / 700, 1.25);
       // A low grassy bank draws the group together without covering the sky.
       const bank = g.createLinearGradient(0, base - 9, 0, h);
       bank.addColorStop(0, "#132c34"); bank.addColorStop(.28, "#071b24"); bank.addColorStop(1, "#020a14");
