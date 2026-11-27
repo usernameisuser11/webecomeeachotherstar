@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Camera, Check, CircleHelp, Flag, Heart, Link2, Plus, ShieldCheck, Sparkles, Tags, Trash2, Volume2, VolumeX, Waypoints, X } from "lucide-react";
 import NightSky, { type Glow, type SpecialLink, type Star } from "../components/NightSky";
 import StellarParticles from "../components/StellarParticles";
+import StarlightWalk from "../components/StarlightWalk";
 
 type SkyState = { stars: Star[]; glows: Glow[]; liveStarIds: string[]; specialLink: SpecialLink | null };
 type SkyTheme = "forest" | "violet" | "ocean" | "dawn";
@@ -51,6 +52,8 @@ export default function Home() {
   const [token, setToken] = useState("");
   const [myStarId, setMyStarId] = useState<string | null>(null);
   const [intro, setIntro] = useState(true);
+  const [sharedSeat, setSharedSeat] = useState(false);
+  const sharedCanvas = useRef<HTMLCanvasElement | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -118,6 +121,7 @@ export default function Home() {
   }, []);
 
   const switchRoom = useCallback((room: ActiveRoom | null) => {
+    setSharedSeat(false);
     roomRef.current = room;
     setActiveRoom(room);
     setSky({ stars: [], glows: [], liveStarIds: [], specialLink: null });
@@ -379,6 +383,7 @@ export default function Home() {
     painter.drawImage(sky, 0, 0, image.width, image.height);
     if (particleCanvas.current) painter.drawImage(particleCanvas.current, 0, 0, image.width, image.height);
     if (meteorCanvas.current) painter.drawImage(meteorCanvas.current, 0, 0, image.width, image.height);
+    if (sharedCanvas.current) painter.drawImage(sharedCanvas.current, 0, 0, image.width, image.height);
     image.toBlob(blob => {
       if (!blob) return;
       const url = URL.createObjectURL(blob), a = document.createElement("a");
@@ -407,12 +412,13 @@ export default function Home() {
   };
   useEffect(() => () => { audioRef.current?.close().catch(() => {}); }, []);
 
-  return <main className="observatory">
+  return <main className={`observatory${sharedSeat && !activeRoom && !intro ? " shared-starlight" : ""}`}>
     <NightSky stars={sky.stars} glows={sky.glows} specialLink={sky.specialLink} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} meteorCanvasRef={meteorCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
     <StellarParticles theme={activeRoom?.theme || "forest"} canvasRef={particleCanvas} />
+    {sharedSeat && !activeRoom && !intro && <StarlightWalk canvasRef={sharedCanvas} paused={placing || !!roomPanel || showCreate || showGuide || !!selectedId} onLeave={() => setSharedSeat(false)} />}
     <div className="film-grain" aria-hidden="true" /><div className="top-vignette" aria-hidden="true" />
     <header className="topbar">
-      <button className="identity" onClick={() => { setIntro(true); setSelectedId(null); setPlacing(false); }} aria-label="처음 화면으로">
+      <button className="identity" onClick={() => { setIntro(true); setSharedSeat(false); setSelectedId(null); setPlacing(false); }} aria-label="처음 화면으로">
         <span className="brand-orbit"><Sparkles size={19} strokeWidth={1.3} /></span>
         <span className="brand-text"><b>우리가 서로의 별이 될 때</b><em>WE BECOME EACH OTHER&apos;S STARS</em></span>
       </button>
@@ -425,6 +431,7 @@ export default function Home() {
 
     <div className="sky-room-nav">
       <button className="current-sky" onClick={openRooms}><span className="room-nav-star">✧</span><span>{activeRoom?.name || "또래상담 별자리"}</span><span className="nav-chevron">⌄</span></button>
+      {!activeRoom && !intro && !sharedSeat && <button className="room-link" onClick={() => { setSelectedId(null); setSharedSeat(true); }}><span>함께 앉기</span></button>}
       {activeRoom && <button className="room-link" onClick={copyRoomLink} title="이 방의 초대 링크 복사" aria-label="초대 링크 복사"><Link2 size={15} /> <span>초대</span></button>}
     </div>
 
@@ -433,6 +440,7 @@ export default function Home() {
       <p className="intro-copy">서로 다른 하루를 보낸 우리가<br />밤이 되면 하나의 별자리가 되는 곳입니다.<br />당신의 작은 빛도 이곳에 남겨 주세요.</p>
       <div className="hero-buttons">
         <button className="primary-cta" onClick={startCreate}><Sparkles size={16} /> {myStarId ? "내 별 찾아가기" : "나의 별 남기기"} <ArrowUpRight size={15} /></button>
+        {!activeRoom && <button className="quiet-cta" onClick={() => { setIntro(false); setSharedSeat(true); }}>함께 하늘 바라보기 <ArrowUpRight size={15} /></button>}
         <button className="quiet-cta" onClick={openRooms}>다른 하늘 둘러보기 <ArrowUpRight size={15} /></button>
       </div>
       <div className="hero-footnote"><span className="little-dot" /> 누군가의 이야기를 들어주는 당신도 잠시 쉬어가세요</div>
