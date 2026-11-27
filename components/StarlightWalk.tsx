@@ -1,4 +1,5 @@
 "use client";
+import { paintTraveler } from "./TravelerArt";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
@@ -64,43 +65,14 @@ export default function StarlightWalk({ canvasRef, paused, onLeave }: Props) {
       raf = requestAnimationFrame(frame);
       if (t - last < 1000 / 30 || !w || !h) return;
       last = t; ctx!.clearRect(0, 0, w, h);
-      const g = ctx!, base = h * (w < 600 ? .78 : .84);
-      const unit = Math.min(w / 365, h / 700, 1.25);
-      // A low grassy bank draws the group together without covering the sky.
-      const bank = g.createLinearGradient(0, base - 9, 0, h);
-      bank.addColorStop(0, "#132c34"); bank.addColorStop(.28, "#071b24"); bank.addColorStop(1, "#020a14");
-      g.fillStyle = bank; g.beginPath(); g.moveTo(0, base + 13);
-      g.bezierCurveTo(w*.23,base+3,w*.32,base-8,w*.53,base);
-      g.bezierCurveTo(w*.72,base+5,w*.89,base-4,w,base+11);
-      g.lineTo(w,h); g.lineTo(0,h); g.closePath(); g.fill();
-      g.strokeStyle = "rgba(145,185,170,.22)"; g.lineWidth = .7;
-      for (let i=0;i<Math.min(160,w/3);i++) {
-        const x = (i*37.37)%w, y=base+9+Math.sin(i*2.31)*5;
-        const bend=still?0:Math.sin(t*.001+i*.62)*1.6;
-        g.beginPath(); g.moveTo(x,y); g.quadraticCurveTo(x+1,y-4,x+bend+2,y-5-(i%6)); g.stroke();
-      }
+      const g = ctx!, base = h * (w < 600 ? .82 : .88);
+      const unit = Math.min(w / 410, h / 750, 1.25);
+      // Keep the original painted meadow visible; the figures share its ground.
       const now = Date.now()+clock.current;
       for (const p of peers.current) {
         const x = w*p.x, y = base + 5 + Math.sin(p.x*12)*2;
         g.save(); g.translate(x,y); g.scale(unit,unit);
-        const breathing=still?0:Math.sin(t*.0015+p.x*20)*.7;
-        const sit=p.pose==="sit", lie=p.pose==="lie";
-        const bodyY = lie?-8:sit?-17:-25;
-        const headY = lie?-12:sit?-30:-40;
-        g.fillStyle="rgba(0,0,0,.35)"; g.beginPath();g.ellipse(0,2,13,3,0,0,Math.PI*2);g.fill();
-        const halo=g.createRadialGradient(0,-12,0,0,-12,26);
-        halo.addColorStop(0,`hsla(${p.hue},65%,70%,${p.glowUntil>now?.33:.10})`);halo.addColorStop(1,"transparent");
-        g.fillStyle=halo;g.fillRect(-28,-40,56,56);
-        g.strokeStyle=`hsl(${p.hue} 35% 46%)`;g.lineWidth=1.2;
-        g.fillStyle="#182733"; g.beginPath();g.ellipse(lie?4:0,bodyY,lie?14:8,lie?5:sit?12:15,0,0,Math.PI*2);g.fill();g.stroke();
-        g.fillStyle="#1b2b36";g.beginPath();g.arc(lie?-10:0,headY+breathing,6.5,0,Math.PI*2);g.fill();g.stroke();
-        // No eyes or face: every person is facing away, towards the stars.
-        g.strokeStyle=`hsla(${p.hue},65%,76%,.75)`;g.beginPath();g.arc(lie?-10:0,headY+breathing,6.7,Math.PI*1.08,Math.PI*1.85);g.stroke();
-        g.lineCap="round";g.lineWidth=4;g.strokeStyle="#22313c";
-        if(sit){g.beginPath();g.moveTo(-5,-12);g.quadraticCurveTo(-12,-4,-8,-1);g.moveTo(5,-12);g.quadraticCurveTo(12,-4,8,-1);g.stroke();}
-        else if(!lie){g.beginPath();g.moveTo(-4,-14);g.lineTo(-5,0);g.moveTo(4,-14);g.lineTo(5,0);g.stroke();}
-        if(p.waveUntil>now){g.strokeStyle=`hsl(${p.hue} 50% 65%)`;g.beginPath();g.moveTo(6,bodyY);g.lineTo(13,bodyY-8);g.lineTo(11+Math.sin(t*.01)*3,bodyY-15);g.stroke();}
-        if(p.id===ownId.current){g.fillStyle="rgba(234,245,244,.8)";g.beginPath();g.arc(0,8,1.8,0,Math.PI*2);g.fill();}
+        paintTraveler(g,p,t,now,still,p.id===ownId.current);
         g.restore();
       }
     }
