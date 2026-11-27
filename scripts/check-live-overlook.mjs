@@ -7,10 +7,12 @@ await mkdir("test-output",{recursive:true});
 async function open(viewport){
  const context=await browser.newContext({viewport,deviceScaleFactor:1});
  const page=await context.newPage();
- page.on("pageerror",e=>errors.push(String(e)));
- page.on("console",m=>{if(m.type()==="error"&&/WebGLProgram|Shader Error|THREE.*error/i.test(m.text()))errors.push(m.text());});
+ page.on("pageerror",e=>{errors.push(String(e));console.error("PAGE ERROR",e.stack);});
+ page.on("console",m=>{if(["error","warning"].includes(m.type())) console.log("BROWSER",m.type(),m.text());if(m.type()==="error"&&/WebGLProgram|Shader Error|THREE.*error/i.test(m.text()))errors.push(m.text());});
+ page.on("requestfailed",r=>console.log("REQUEST FAILED",r.url(),r.failure()));
+ page.on("response",r=>{if(r.status()>=400)console.log("HTTP",r.status(),r.url());});
  await page.goto("http://127.0.0.1:8787/",{waitUntil:"domcontentloaded"});
- await page.locator('canvas.sky-canvas[data-renderer="live-webgl"]').waitFor({timeout:45000});
+ try {await page.locator('canvas.sky-canvas[data-renderer="live-webgl"]').waitFor({timeout:45000});} catch(e){console.log("3D STATUS",await page.locator("canvas.sky-canvas").evaluate(el=>({dataset:{...el.dataset},width:el.width,height:el.height})).catch(()=>null));await page.screenshot({path:"test-output/failure-"+viewport.width+".png"});throw e;}
  return page;
 }
 try{
