@@ -1,4 +1,5 @@
 "use client";
+import { loadOverlook, paintOverlook } from "./OverlookArt";
 
 import { useEffect, useRef } from "react";
 import { drawMemoryTree } from "./MemoryTree";
@@ -451,6 +452,16 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     const meteorCtx = meteorPainter;
     let destroyed = false, frame = 0, meteorFrame = 0;
     let backdrop: HTMLCanvasElement | null = null;
+    let overlook: HTMLImageElement | null = null;
+    let overlookLayer: HTMLCanvasElement | null = null;
+    const artController = new AbortController();
+    function cacheOverlook() {
+      if (!overlook || !w || !h) return;
+      overlookLayer = document.createElement("canvas");
+      overlookLayer.width = canvas!.width; overlookLayer.height = canvas!.height;
+      const painter = overlookLayer.getContext("2d");
+      if (painter) { painter.setTransform(dpr, 0, 0, dpr, 0, 0); paintOverlook(painter, overlook, w, h); }
+    }
     let terrainLayer: HTMLCanvasElement | null = null;
     let treeLayer: HTMLCanvasElement | null = null;
     let treeCtx: CanvasRenderingContext2D | null = null;
@@ -600,6 +611,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       meteorLayerClear = true;
       local.current = { w, h };
       backdrop = createBackdrop(w, h, theme);
+      cacheOverlook();
       terrainLayer = document.createElement("canvas");
       terrainLayer.width = canvas.width;
       terrainLayer.height = canvas.height;
@@ -620,6 +632,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas);
     resize();
+    if (theme === "forest") loadOverlook(w >= 900, artController.signal).then(image => { if (!destroyed) { overlook = image; cacheOverlook(); } }).catch(() => {});
 
     function spawnMeteor(t: number, bright = 1) {
       // Keep a whole meteor in the portrait frame. A fireball travels farther,
@@ -654,19 +667,20 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       lastPaint = now;
       const t = (now - timeZero) / 1000;
       ctx.clearRect(0, 0, w, h);
-      if (backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
+      if (overlookLayer) ctx.drawImage(overlookLayer, 0, 0, w, h);
+      else if (backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
 
       // Batched static point plates replace thousands of per-frame draws.
       // Different phase groups breathe only slightly; the independent WebGL
       // points above remain the main source of true individual scintillation.
       ctx.save(); ctx.globalCompositeOperation = "screen";
       for (let i = 0; i < ambientLayers.length; i++) {
-        ctx.globalAlpha = .87 + .13 * Math.sin(t * (.27 + i * .08) + i * 2.37);
+        ctx.globalAlpha = (overlookLayer ? .32 : 1) * (.87 + .13 * Math.sin(t * (.27 + i * .08) + i * 2.37));
         ctx.drawImage(ambientLayers[i], 0, 0, w, h);
       }
       ctx.restore();
 
-      if (terrainLayer) ctx.drawImage(terrainLayer, 0, 0, w, h);
+      if (terrainLayer && !overlookLayer) ctx.drawImage(terrainLayer, 0, 0, w, h);
 
       const growthEase = 1 - Math.exp(-deltaSeconds / 19);
       treeStarGrowth += (refs.current.stars.length - treeStarGrowth) * growthEase;
@@ -841,7 +855,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     }
     frame = requestAnimationFrame(render);
     meteorFrame = requestAnimationFrame(renderMeteors);
-    return () => { destroyed = true; cancelAnimationFrame(frame); cancelAnimationFrame(meteorFrame); resizeObserver.disconnect(); };
+    return () => { destroyed = true; artController.abort(); cancelAnimationFrame(frame); cancelAnimationFrame(meteorFrame); resizeObserver.disconnect(); };
   }, [canvasRef, meteorCanvasRef, theme]);
 
   return <><canvas
