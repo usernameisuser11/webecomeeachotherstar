@@ -156,48 +156,113 @@ function makeLake(){
   `});
   const mesh=new T.Mesh(new T.PlaneGeometry(160,130,75,55),mat);mesh.rotation.x=-Math.PI/2;mesh.position.set(0,-1.52,-62);return mesh;
 }
-function bladeGeometry(){
-  const p=[],idx=[];
-  for(let i=0;i<=7;i++){const t=i/7,wide=.058*Math.pow(1-t,.66),x=t*t*.18; p.push(x-wide,t,0,x+wide,t,.025*Math.sin(t*Math.PI));if(i<7){const k=i*2;idx.push(k,k+1,k+2,k+1,k+3,k+2);}}
-  const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setIndex(idx);g.computeVertexNormals();return g;
+// A grass tuft contains individually shaped curved leaves, not upright uniform strips.
+// Reference techniques: Bezier blades (ChrisHowDev/WebGLProcedualGrass), per-blade
+// variation (gzatravkin/GrassSimulation), root-to-tip color (three-stylized).
+function tuftGeometry(seed,leaves,segments){
+ const r=random(seed),p=[],col=[],ids=[],flex=[];
+ for(let n=0;n<leaves;n++){
+  const angle=n*2.399963+r()*.55,dx=Math.cos(angle),dz=Math.sin(angle);
+  const bx=-dz,bz=dx,offset=.018+r()*.035;
+  const height=.52+r()*.48,lean=.18+r()*.56,wide=.024+r()*.021;
+  const base=p.length/3;
+  for(let j=0;j<=segments;j++){
+   const t=j/segments,curvature=t*t,spread=offset+lean*curvature;
+   const cx=dx*spread,cz=dz*spread;
+   const y=height*(t-.20*lean*t*t*t);
+   const width=wide*Math.pow(1-t,.72)*(.82+.18*Math.sin(t*Math.PI));
+   const fold=width*.26*Math.sin(Math.PI*t);
+   p.push(cx-bx*width,y,cz-bz*width,cx+dx*fold,y,cz+dz*fold,cx+bx*width,y,cz+bz*width);
+   const light=.46+.54*Math.pow(t,.67);
+   for(let k=0;k<3;k++){col.push(light*.94,light,light*.92);flex.push(t);}
+   if(j<segments){const k=base+j*3;ids.push(k,k+3,k+1,k+1,k+3,k+4,k+1,k+4,k+2,k+2,k+4,k+5);}
+  }
+ }
+ const g=new T.BufferGeometry();
+ g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setAttribute("color",new T.Float32BufferAttribute(col,3));
+ g.setAttribute("bladeFlex",new T.Float32BufferAttribute(flex,1));g.setIndex(ids);g.computeVertexNormals();return g;
 }
 function makeMeadow(scene,rand,small){
-  const wind={value:0},g=bladeGeometry(),m=new T.MeshStandardMaterial({color:"#ffffff",side:T.DoubleSide,roughness:1});
-  m.onBeforeCompile=s=>{s.uniforms.wind=wind;s.vertexShader=s.vertexShader.replace("#include <common>","#include <common>\nuniform float wind;").replace("#include <begin_vertex>",`#include <begin_vertex>
-    #ifdef USE_INSTANCING
-      float ph=instanceMatrix[3].x*.25+instanceMatrix[3].z*.19;
-      transformed.x+=pow(max(0.,position.y),1.7)*(.15*sin(wind*.84+ph)+.05*sin(wind*2.1+ph*3.));
-      transformed.z+=pow(max(0.,position.y),1.6)*.085*sin(wind*.69+ph);
-    #endif`);};
-  const count=small?3900:7200,mesh=new T.InstancedMesh(g,m,count),o=new T.Object3D(),dark=new T.Color("#294b45"),light=new T.Color("#9caa71"),c=new T.Color();
-  for(let i=0;i<count;i++){
-    let x,z,patch;
-    // Prefer irregular colonies over uniformly spaced blades.
-    for(let attempt=0;attempt<8;attempt++){
-      x=(rand()-.5)*43;z=-17+rand()*30;
-      patch=fbm(x*.21,z*.23,81);
-      if(ground(x,z)>-.9&&rand()<.18+.82*patch)break;
-    }
-    const seating=Math.exp(-Math.pow((z+3.0)/3.8,2))*Math.exp(-Math.pow(x/15,4));
-    const foreground=clamp((z-3)/9,0,1);
-    const side=clamp((Math.abs(x)-6)/13,0,1);
-    const height=ground(x,z)<-.9?0:(.032+Math.pow(rand(),2.8)*(.14+side*.15))*(.62+patch*.80)*(1-.78*seating)*(1-.58*foreground);
-    const width=.11+height*.60+rand()*.11;
-    o.position.set(x,ground(x,z)-.012,z);o.rotation.set(0,rand()*TAU,(rand()-.5)*.38);o.scale.set(width,height,width);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
-    c.copy(dark).lerp(light,rand()*.83);mesh.setColorAt(i,c);
+ const wind={value:0},local=random(923781),o=new T.Object3D();
+ const m=new T.MeshStandardMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,roughness:.93});
+ m.onBeforeCompile=shader=>{
+   shader.uniforms.wind=wind;
+   shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nuniform float wind;\nattribute float bladeFlex;\nvarying float vBladeTip;")
+   .replace("#include <begin_vertex>",`#include <begin_vertex>
+      vBladeTip=bladeFlex;
+      #ifdef USE_INSTANCING
+        vec2 p=instanceMatrix[3].xz;
+        float mainWave=sin(wind*.78-p.x*.24-p.y*.15);
+        float gust=pow(.5+.5*sin(wind*.30-p.x*.16-p.y*.10),3.);
+        float fine=sin(wind*1.9+p.x*.87-p.y*.59);
+        float f=bladeFlex*bladeFlex;
+        // Keep the roots fixed while a broad gust moves across the meadow.
+        vec2 sway=vec2(.15*mainWave+.12*gust+.027*fine,.065*mainWave+.035*fine)*f;
+        vec3 worldSway=vec3(sway.x,0.,sway.y);
+        vec3 xAxis=normalize(instanceMatrix[0].xyz);
+        vec3 zAxis=normalize(instanceMatrix[2].xyz);
+        transformed.x+=dot(worldSway,xAxis);
+        transformed.z+=dot(worldSway,zAxis);
+        transformed.y-=f*.024*gust;
+      #endif`);
+   shader.fragmentShader=shader.fragmentShader.replace("#include <common>","#include <common>\nvarying float vBladeTip;")
+    .replace("#include <color_fragment>",`#include <color_fragment>
+      diffuseColor.rgb*=mix(vec3(.88,.91,.91),vec3(1.09,1.06,.97),pow(vBladeTip,1.6));
+    `)
+    .replace("#include <emissivemap_fragment>",`#include <emissivemap_fragment>
+      totalEmissiveRadiance+=diffuseColor.rgb*vec3(.08,.11,.15)*pow(vBladeTip,2.);
+    `);
+ };
+ m.customProgramCacheKey=()=>"soft-tuft-meadow-v1";
+ const dark=new T.Color("#486451"),light=new T.Color("#7d9471"),dry=new T.Color("#8b8469"),c=new T.Color();
+ const counts=small?[1150,1050,850]:[2150,1800,1550];
+ for(let group=0;group<3;group++){
+  const g=tuftGeometry(781+group*71,group===0?5:group===1?4:3,group===0?6:4);
+  const mesh=new T.InstancedMesh(g,m,counts[group]);
+  for(let i=0;i<counts[group];i++){
+   let x=0,z=0,patch=0,y=-3;
+   for(let attempt=0;attempt<12;attempt++){
+    x=(local()-.5)*44;z=-17.8+local()*31;
+    y=ground(x,z);patch=fbm(x*.29,z*.32,87);
+    if(y>-.95&&local()<.22+.72*patch)break;
+   }
+   const seat=Math.exp(-Math.pow((z+3)/3.5,2))*Math.exp(-Math.pow(x/13,4));
+   const near=clamp((z-3)/9,0,1),edge=clamp((Math.abs(x)-7)/13,0,1);
+   const height=y<-.95?0:(.043+Math.pow(local(),2.5)*(.135+.075*edge))*(.72+.57*patch)*(1-.72*seat)*(1-.55*near);
+   const spread=height*(.68+local()*.38);
+   o.position.set(x,y-.01,z);o.rotation.set(0,local()*TAU,0);o.scale.set(spread,height,spread);o.updateMatrix();
+   // Zero-size rejected locations are hidden by the mesh scale.
+   if(height===0){o.position.y=-20;o.scale.setScalar(.0001);o.updateMatrix();}
+   mesh.setMatrixAt(i,o.matrix);
+   c.copy(dark).lerp(light,Math.pow(local(),1.35)*.8).lerp(dry,local()*.14);mesh.setColorAt(i,c);
   }
-  mesh.frustumCulled=false;scene.add(mesh);
-  // Flowers are actual petal meshes; clusters have varied stem heights.
-  const flowerCount=small?105:210,petals=new T.InstancedMesh(new T.SphereGeometry(.055,7,5),new T.MeshStandardMaterial({roughness:.8}),flowerCount*5);
-  const stems=new T.InstancedMesh(new T.CylinderGeometry(.011,.018,1,5),new T.MeshStandardMaterial({color:"#687b4c",roughness:1}),flowerCount);
-  const palette=["#ba9ad9","#c7d7f2","#e4bb90","#aab9e4"].map(s=>new T.Color(s));
-  for(let i=0;i<flowerCount;i++){
-    let x=(rand()-.5)*36,z=-15+rand()*25;if(Math.abs(z+3.0)<2.8)z+=4.0;
-    const y=ground(x,z),h=y<-.9?0:.075+rand()*.13;
-    o.position.set(x,y+h*.5,z);o.rotation.set(0,0,(rand()-.5)*.13);o.scale.set(1,h,1);o.updateMatrix();stems.setMatrixAt(i,o.matrix);
-    for(let j=0;j<5;j++){let a=j*TAU/5;o.position.set(x+Math.cos(a)*.06,y+h,z+Math.sin(a)*.06);o.rotation.set(0,-a,0);o.scale.set(.90,.36,.52);o.updateMatrix();petals.setMatrixAt(i*5+j,o.matrix);petals.setColorAt(i*5+j,palette[i%4]);}
-  }
-  scene.add(stems,petals);return wind;
+  mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;scene.add(mesh);
+ }
+ // Small wildflowers grow in irregular patches away from the seating strip.
+ const flowerCount=small?65:130;
+ const petalGeo=new T.SphereGeometry(.035,9,6);
+ const petals=new T.InstancedMesh(petalGeo,new T.MeshStandardMaterial({roughness:.85}),flowerCount*5);
+ const stems=new T.InstancedMesh(new T.CylinderGeometry(.0035,.005,1,5),new T.MeshStandardMaterial({color:"#667b57",roughness:1}),flowerCount);
+ const centers=new T.InstancedMesh(new T.SphereGeometry(.013,7,5),new T.MeshStandardMaterial({color:"#d4b890",roughness:.84}),flowerCount);
+ const palette=["#a99ac5","#c3cedc","#d8b99b","#a3aecb"].map(v=>new T.Color(v));
+ for(let i=0;i<flowerCount;i++){
+   let x,z,y;
+   for(let j=0;j<14;j++){
+    x=(local()-.5)*34;z=-15+local()*22;y=ground(x,z);
+    if(y>-.85&&Math.abs(z+3)>3.1&&fbm(x*.21,z*.28,177)>.41)break;
+   }
+   if(y<-.85||Math.abs(z+3)<3.1)y=-20;
+   const h=.055+local()*.10;
+   o.position.set(x,y+h*.5,z);o.rotation.set(0,0,0);o.scale.set(1,h,1);o.updateMatrix();stems.setMatrixAt(i,o.matrix);
+   o.position.set(x,y+h,z);o.scale.set(1,.58,1);o.updateMatrix();centers.setMatrixAt(i,o.matrix);
+   for(let j=0;j<5;j++){
+    const a=j*TAU/5+i*2.39;
+    o.position.set(x+Math.cos(a)*.022,y+h,z+Math.sin(a)*.022);
+    o.rotation.set(.13*Math.cos(a),-a,.12*Math.sin(a));o.scale.set(.90,.22,.44);o.updateMatrix();
+    petals.setMatrixAt(i*5+j,o.matrix);petals.setColorAt(i*5+j,palette[i%4]);
+   }
+ }
+ scene.add(stems,petals,centers);return wind;
 }
 function makeRocks(scene,rand){
   const geo=new T.IcosahedronGeometry(1,2),p=geo.attributes.position;
