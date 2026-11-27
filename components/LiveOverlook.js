@@ -138,24 +138,68 @@ function makeStars(rand){
   `});
   return new T.Points(geo,material);
 }
-function makeLake(){
-  const mat=new T.ShaderMaterial({side:T.DoubleSide,uniforms:{time:{value:0}},vertexShader:`
-   varying vec2 p;uniform float time;
-   void main(){p=position.xy;vec3 q=position;q.z+=.036*sin(p.x*.6+p.y*.23+time*.6)+.016*sin(p.y*1.5-p.x*.4-time*.5);gl_Position=projectionMatrix*modelViewMatrix*vec4(q,1.);}
-  `,fragmentShader:`
-   precision highp float;varying vec2 p;uniform float time;
-   void main(){float w=sin(p.y*2.7+p.x*.41+time*.7+sin(p.x*.29+p.y*.14-time*.3)*1.6);float q=sin(p.y*5.2-p.x*.75-time*.9);
-     float crossed=sin(p.x*1.7+p.y*3.1-time*.52+sin(p.x*.42+p.y*.33)*2.);
-     float glint=pow(max(0.,w*.53+q*.29+crossed*.18),9.);
-     float stripe=exp(-abs(p.x+sin(p.y*.19+time*.13)*2.+sin(p.y*.06)*4.)*.085);
-     float farWater=smoothstep(-40.,40.,p.y);
-     vec3 c=mix(vec3(.014,.034,.055),vec3(.039,.065,.115),farWater);
-     c+=vec3(.065,.095,.14)*(.5+.5*w)*(.11+.10*farWater);
-     c+=vec3(.20,.25,.36)*glint*(.045+.19*stripe);gl_FragColor=vec4(c,1.);
-     #include <colorspace_fragment>
-   }
-  `});
-  const mesh=new T.Mesh(new T.PlaneGeometry(160,130,75,55),mat);mesh.rotation.x=-Math.PI/2;mesh.position.set(0,-1.52,-62);return mesh;
+// Live planar reflection. Only the distant landscape is drawn into this small
+// render target; it is regenerated on the GPU, never loaded from an image.
+function makeLake(small){
+ const level=-1.52;
+ const target=new T.WebGLRenderTarget(small?320:600,small?320:420,{minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true});
+ const mirror=new T.PerspectiveCamera(),projection=new T.Matrix4(),direction=new T.Vector3(),focus=new T.Vector3();
+ mirror.layers.set(1);
+ const uniforms={time:{value:0},reflection:{value:target.texture},reflectionMatrix:{value:projection},reflectionReady:{value:0}};
+ const mat=new T.ShaderMaterial({side:T.DoubleSide,uniforms,vertexShader:`
+  varying vec3 world;varying vec4 reflected;uniform mat4 reflectionMatrix;uniform float time;
+  void main(){
+   vec3 p=position;
+   p.z+=.008*sin(p.x*.70+p.y*.31+time*.47)+.006*sin(p.y*1.4-p.x*.35-time*.36);
+   vec4 w=modelMatrix*vec4(p,1.);world=w.xyz;reflected=reflectionMatrix*w;
+   gl_Position=projectionMatrix*viewMatrix*w;
+  }`,fragmentShader:`
+  precision highp float;
+  varying vec3 world;varying vec4 reflected;
+  uniform sampler2D reflection;uniform float time,reflectionReady;
+  void main(){
+   vec2 p=world.xz;
+   float a=sin(p.x*.43+p.y*1.60+time*.65+1.4*sin(p.x*.11+p.y*.23));
+   float b=sin(p.x*1.51-p.y*2.30-time*.48);
+   float c=sin(p.x*.75+p.y*3.4+time*.33+sin(p.x*.3));
+   vec3 v=normalize(cameraPosition-world);
+   float fresnel=.23+.72*pow(1.-clamp(v.y,0.,1.),4.);
+   vec2 uv=reflected.xy/max(.0001,reflected.w)*.5+.5;
+   uv+=vec2((a*.0016+b*.0009),(.0025*a+.0011*c));
+   float inside=step(.001,uv.x)*step(uv.x,.999)*step(.001,uv.y)*step(uv.y,.999)*step(.0001,reflected.w);
+   vec3 refl=texture2D(reflection,clamp(uv,vec2(.002),vec2(.998))).rgb;
+   vec3 base=mix(vec3(.012,.024,.038),vec3(.023,.042,.062),clamp(v.y,0.,1.));
+   vec3 color=mix(base,refl*vec3(.72,.83,.93),fresnel*reflectionReady*inside*.89);
+   float glint=pow(max(0.,a*.50+b*.32+c*.18),15.);
+   color+=vec3(.075,.12,.18)*glint*(.35+.65*fresnel);
+   gl_FragColor=vec4(color,1.);
+   #include <tonemapping_fragment>
+   #include <colorspace_fragment>
+  }`});
+ const mesh=new T.Mesh(new T.PlaneGeometry(160,130,65,48),mat);
+ mesh.rotation.x=-Math.PI/2;mesh.position.set(0,level,-62);
+ let last=-Infinity,lastAspect=0;
+ function reflect(renderer,scene,camera,ms){
+  if(ms-last<220&&Math.abs(camera.aspect-lastAspect)<.01)return;
+  last=ms;lastAspect=camera.aspect;
+  const width=small?320:600,height=Math.max(140,Math.min(small?520:580,Math.round(width/camera.aspect)));
+  if(target.width!==width||target.height!==height)target.setSize(width,height);
+  camera.updateMatrixWorld(true);camera.getWorldDirection(direction);
+  mirror.position.copy(camera.position);mirror.position.y=2*level-camera.position.y;
+  direction.y=-direction.y;mirror.up.set(0,-1,0);
+  focus.copy(mirror.position).add(direction);mirror.lookAt(focus);
+  mirror.fov=camera.fov;mirror.aspect=camera.aspect;mirror.near=camera.near;mirror.far=camera.far;
+  mirror.updateProjectionMatrix();mirror.updateMatrixWorld(true);
+  projection.multiplyMatrices(mirror.projectionMatrix,mirror.matrixWorldInverse);
+  const previous=renderer.getRenderTarget(),clip=renderer.clippingPlanes;
+  try{
+   renderer.clippingPlanes=[new T.Plane(new T.Vector3(0,1,0),-level+.015)];
+   renderer.setRenderTarget(target);renderer.clear();renderer.render(scene,mirror);
+   uniforms.reflectionReady.value=1;
+  }catch(e){uniforms.reflectionReady.value=0;console.warn("Water reflection unavailable",e);}
+  finally{renderer.setRenderTarget(previous);renderer.clippingPlanes=clip;}
+ }
+ return {mesh,material:mat,reflect,dispose(){target.dispose();}};
 }
 // A grass tuft contains individually shaped curved leaves, not upright uniform strips.
 // Reference techniques: Bezier blades (ChrisHowDev/WebGLProcedualGrass), per-blade
@@ -174,7 +218,7 @@ function tuftGeometry(seed,leaves,segments){
    const width=wide*Math.pow(1-t,.72)*(.82+.18*Math.sin(t*Math.PI));
    const fold=width*.26*Math.sin(Math.PI*t);
    p.push(cx-bx*width,y,cz-bz*width,cx+dx*fold,y,cz+dz*fold,cx+bx*width,y,cz+bz*width);
-   const light=.46+.54*Math.pow(t,.67);
+   const light=.59+.41*Math.pow(t,.78);
    for(let k=0;k<3;k++){col.push(light*.94,light,light*.92);flex.push(t);}
    if(j<segments){const k=base+j*3;ids.push(k,k+3,k+1,k+1,k+3,k+4,k+1,k+4,k+2,k+2,k+4,k+5);}
   }
@@ -208,29 +252,32 @@ function makeMeadow(scene,rand,small){
       #endif`);
    shader.fragmentShader=shader.fragmentShader.replace("#include <common>","#include <common>\nvarying float vBladeTip;")
     .replace("#include <color_fragment>",`#include <color_fragment>
-      diffuseColor.rgb*=mix(vec3(.88,.91,.91),vec3(1.09,1.06,.97),pow(vBladeTip,1.6));
+      diffuseColor.rgb*=mix(vec3(.93,.96,.94),vec3(1.04,1.03,.98),pow(vBladeTip,1.6));
     `)
     .replace("#include <emissivemap_fragment>",`#include <emissivemap_fragment>
-      totalEmissiveRadiance+=diffuseColor.rgb*vec3(.08,.11,.15)*pow(vBladeTip,2.);
+      totalEmissiveRadiance+=diffuseColor.rgb*vec3(.05,.075,.10)*pow(vBladeTip,2.);
     `);
  };
  m.customProgramCacheKey=()=>"soft-tuft-meadow-v1";
- const dark=new T.Color("#486451"),light=new T.Color("#7d9471"),dry=new T.Color("#8b8469"),c=new T.Color();
- const counts=small?[1150,1050,850]:[2150,1800,1550];
+ const dark=new T.Color("#455c43"),light=new T.Color("#82956a"),dry=new T.Color("#8a8263"),c=new T.Color();
+ const counts=small?[1650,1250,950]:[3000,2100,1750];
  for(let group=0;group<3;group++){
   const g=tuftGeometry(781+group*71,group===0?5:group===1?4:3,group===0?6:4);
   const mesh=new T.InstancedMesh(g,m,counts[group]);
   for(let i=0;i<counts[group];i++){
    let x=0,z=0,patch=0,y=-3;
    for(let attempt=0;attempt<12;attempt++){
-    x=(local()-.5)*44;z=-17.8+local()*31;
-    y=ground(x,z);patch=fbm(x*.29,z*.32,87);
-    if(y>-.95&&local()<.22+.72*patch)break;
+    // Concentrate fine turf in the visible meadow and keep the side banks irregular.
+    const close=group===0;
+    x=(local()-.5)*(close?24:42);z=(close?-10.5:-17.8)+local()*(close?20:30);
+    y=ground(x,z);patch=fbm(x*.24,z*.29,87);
+    const clearance=Math.exp(-Math.pow((z+3)/2.0,2))*Math.exp(-Math.pow(x/10,4));
+    if(y>-.95&&local()<(.42+.55*patch)*(1-.18*clearance))break;
    }
    const seat=Math.exp(-Math.pow((z+3)/3.5,2))*Math.exp(-Math.pow(x/13,4));
    const near=clamp((z-3)/9,0,1),edge=clamp((Math.abs(x)-7)/13,0,1);
-   const height=y<-.95?0:(.043+Math.pow(local(),2.5)*(.135+.075*edge))*(.72+.57*patch)*(1-.72*seat)*(1-.55*near);
-   const spread=height*(.68+local()*.38);
+   const height=y<-.95?0:(.043+Math.pow(local(),2.1)*(.11+.085*edge))*(.83+.42*patch)*(1-.61*seat)*(1-.37*near);
+   const spread=height*(1.22+local()*.60);
    o.position.set(x,y-.01,z);o.rotation.set(0,local()*TAU,0);o.scale.set(spread,height,spread);o.updateMatrix();
    // Zero-size rejected locations are hidden by the mesh scale.
    if(height===0){o.position.y=-20;o.scale.setScalar(.0001);o.updateMatrix();}
@@ -427,13 +474,16 @@ export function createLiveOverlook(){
  const ambient=new T.HemisphereLight("#c3d2ff","#48564b",1.60);scene.add(ambient);
  const moonlight=new T.DirectionalLight("#c6d9ff",2.35);moonlight.position.set(-28,19,-30);scene.add(moonlight);
  const rim=new T.DirectionalLight("#f0c5b4",.52);rim.position.set(35,8,-40);scene.add(rim);
- const sky=makeSky(),stars=makeStars(rand);scene.add(sky,stars);
+ const sky=makeSky(),stars=makeStars(rand);scene.add(sky,stars);sky.layers.enable(1);stars.layers.enable(1);
  scene.add(meshTerrain(240,112,180,-142,mountainHeight(11,-143,42,29),"#263953","#8496be"));
  scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
  scene.add(meshTerrain(155,62,132,-60,mountainHeight(87,-61,17,15),"#1b313e","#456771"));
- const lake=makeLake();scene.add(lake);
- scene.add(meshTerrain(100,62,108,2,ground,"#253f40","#69865c"));
- const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeWoodland(scene,rand,small);
+ for(const object of scene.children)if(object.isMesh)object.layers.enable(1);
+ const lake=makeLake(small);scene.add(lake.mesh);
+ scene.add(meshTerrain(100,62,small?144:184,2,ground,"#344b3c","#637a50"));
+ const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);
+ const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);
+ for(const object of scene.children)if(!beforeForest.has(object))object.layers.enable(1);
  const tree=makeMemoryTree(scene,rand,small);const people=new Map();
  let w=0,h=0,last=-Infinity,dead=false;
  const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -466,10 +516,11 @@ export function createLiveOverlook(){
        v.update(p,t,Date.now(),dt,reduced);
        if(p.pose==="lie")v.root.position.y+=.22;
      }
+     lake.reflect(renderer,scene,camera,ms);
      renderer.render(scene,camera);last=ms;
    }
    ctx.drawImage(renderer.domElement,0,0,width,height);return true;
  }
- function dispose(){dead=true;for(const v of people.values()){scene.remove(v.root,v.shadow.mesh);v.shadow.dispose();v.dispose();}people.clear();scene.traverse(o=>{if(o.isMesh||o.isPoints){if(o.geometry&&!o.geometry.userData.sharedHuman)o.geometry.dispose();const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>m?.dispose());}});renderer.dispose();renderer.forceContextLoss();}
+ function dispose(){dead=true;lake.dispose();for(const v of people.values()){scene.remove(v.root,v.shadow.mesh);v.shadow.dispose();v.dispose();}people.clear();scene.traverse(o=>{if(o.isMesh||o.isPoints){if(o.geometry&&!o.geometry.userData.sharedHuman)o.geometry.dispose();const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>m?.dispose());}});renderer.dispose();renderer.forceContextLoss();}
  return {render,dispose};
 }
