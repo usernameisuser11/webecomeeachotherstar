@@ -18,3 +18,19 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npx wrangler deploy --dry-run --config wrangler.cloudflare.jsonc --outdir /tmp/starlight-worker
+      - run: npm install --no-save --package-lock=false playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start local Workers runtime and test live 3D
+        run: |
+          npm start > /tmp/starlight.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/ > /dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/check-live-overlook.mjs || { cat /tmp/starlight.log; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: starlight-browser-preview
+          path: test-output/
+          if-no-files-found: ignore
