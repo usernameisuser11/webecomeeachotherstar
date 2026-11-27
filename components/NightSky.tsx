@@ -666,6 +666,8 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       let rendered3d = false;
       if (liveWorld) { try { rendered3d = liveWorld.render(ctx, w, h, now, livePeers.current, refs.current.stars.length); } catch (err) { console.warn("3D render unavailable", err); liveWorld.dispose(); liveWorld = null; } }
       if (rendered3d !== liveReady) { liveReady = rendered3d; onLiveReady(liveReady); }
+      canvas.dataset.renderer = rendered3d ? "live-webgl" : "fallback";
+      canvas.dataset.liveVisitors = rendered3d ? String(livePeers.current.length) : "0";
       if (!rendered3d && backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
 
       // Batched static point plates replace thousands of per-frame draws.
