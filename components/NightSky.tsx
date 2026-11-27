@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { drawMemoryTree } from "./MemoryTree";
+import type { LiveOverlook, LivePeer } from "./LiveOverlook";
 
 export type Star = { id: string; name: string; x: number; y: number; hue: number; createdAt: number };
 export type Glow = { toStarId: string; createdAt: number };
@@ -22,6 +23,8 @@ type Props = {
   intro: boolean;
   theme: SkyTheme;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  livePeers: React.RefObject<LivePeer[]>;
+  onLiveReady: (ready: boolean) => void;
   meteorCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   onSpot: (x: number, y: number) => void;
   onSelectStar: (id: string) => void;
@@ -435,7 +438,7 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
   ctx.fillStyle = bottom; ctx.fillRect(0, h * .91, w, h * .09);
 }
 
-export default function NightSky({ stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, theme, canvasRef, meteorCanvasRef, onSpot, onSelectStar }: Props) {
+export default function NightSky({ stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, theme, canvasRef, meteorCanvasRef, livePeers, onLiveReady, onSpot, onSelectStar }: Props) {
   const refs = useRef({ stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar });
   useEffect(() => { refs.current = { stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar }; }, [stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar]);
   const local = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -451,6 +454,12 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     const meteorCtx = meteorPainter;
     let destroyed = false, frame = 0, meteorFrame = 0;
     let backdrop: HTMLCanvasElement | null = null;
+    let liveWorld: LiveOverlook | null = null;
+    let liveReady = false;
+    onLiveReady(false);
+    if (theme === "forest") void import("./LiveOverlook").then(({createLiveOverlook}) => {
+      if (!destroyed) { try { liveWorld = createLiveOverlook(); } catch (err) { console.warn("3D observatory unavailable", err); } }
+    }).catch(err => console.warn("3D module unavailable", err));
     let terrainLayer: HTMLCanvasElement | null = null;
     let treeLayer: HTMLCanvasElement | null = null;
     let treeCtx: CanvasRenderingContext2D | null = null;
@@ -654,26 +663,31 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       lastPaint = now;
       const t = (now - timeZero) / 1000;
       ctx.clearRect(0, 0, w, h);
-      if (backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
+      let rendered3d = false;
+      if (liveWorld) { try { rendered3d = liveWorld.render(ctx, w, h, now, livePeers.current, refs.current.stars.length); } catch (err) { console.warn("3D render unavailable", err); liveWorld.dispose(); liveWorld = null; } }
+      if (rendered3d !== liveReady) { liveReady = rendered3d; onLiveReady(liveReady); }
+      canvas.dataset.renderer = rendered3d ? "live-webgl" : "fallback";
+      canvas.dataset.liveVisitors = rendered3d ? String(livePeers.current.length) : "0";
+      if (!rendered3d && backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
 
       // Batched static point plates replace thousands of per-frame draws.
       // Different phase groups breathe only slightly; the independent WebGL
       // points above remain the main source of true individual scintillation.
       ctx.save(); ctx.globalCompositeOperation = "screen";
       for (let i = 0; i < ambientLayers.length; i++) {
-        ctx.globalAlpha = .87 + .13 * Math.sin(t * (.27 + i * .08) + i * 2.37);
+        ctx.globalAlpha = (rendered3d ? .22 : 1) * (.87 + .13 * Math.sin(t * (.27 + i * .08) + i * 2.37));
         ctx.drawImage(ambientLayers[i], 0, 0, w, h);
       }
       ctx.restore();
 
-      if (terrainLayer) ctx.drawImage(terrainLayer, 0, 0, w, h);
+      if (terrainLayer && !rendered3d) ctx.drawImage(terrainLayer, 0, 0, w, h);
 
       const growthEase = 1 - Math.exp(-deltaSeconds / 19);
       treeStarGrowth += (refs.current.stars.length - treeStarGrowth) * growthEase;
       treeGlowGrowth += (refs.current.glows.length - treeGlowGrowth) * growthEase;
       // Tree growth and motes change slowly. Reuse a transparent tree frame on
       // phones; the independent meteor canvas can now run at display cadence.
-      if (treeLayer && treeCtx) {
+      if (treeLayer && treeCtx && !rendered3d) {
         if (now - lastTreePaint >= (w < 750 ? 1000 / 17 : 1000 / 30)) {
           treeCtx.clearRect(0, 0, w, h);
           drawMemoryTree(treeCtx, w, h, t, treeStarGrowth, treeGlowGrowth);
@@ -841,8 +855,8 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     }
     frame = requestAnimationFrame(render);
     meteorFrame = requestAnimationFrame(renderMeteors);
-    return () => { destroyed = true; cancelAnimationFrame(frame); cancelAnimationFrame(meteorFrame); resizeObserver.disconnect(); };
-  }, [canvasRef, meteorCanvasRef, theme]);
+    return () => { destroyed = true; liveWorld?.dispose(); cancelAnimationFrame(frame); cancelAnimationFrame(meteorFrame); resizeObserver.disconnect(); };
+  }, [canvasRef, meteorCanvasRef, theme, livePeers, onLiveReady]);
 
   return <><canvas
     ref={canvasRef}

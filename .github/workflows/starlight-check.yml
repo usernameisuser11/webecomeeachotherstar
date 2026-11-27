@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -18,3 +18,21 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npx wrangler deploy --dry-run --config wrangler.cloudflare.jsonc --outdir /tmp/starlight-worker
+      - run: npm install --prefix /tmp/starlight-test --no-package-lock playwright@1.56.1
+      - run: ln -s /tmp/starlight-test/node_modules/playwright node_modules/playwright
+      - run: /tmp/starlight-test/node_modules/.bin/playwright install --with-deps chromium
+      - name: Start local Workers runtime and test live 3D
+        run: |
+          npx wrangler d1 migrations apply webecomeeachotherstar-db --local --config wrangler.cloudflare.jsonc --persist-to .wrangler/test-state
+          npx wrangler dev --config wrangler.cloudflare.jsonc --local --persist-to .wrangler/test-state --ip 127.0.0.1 --port 8787 --inspector-port 0 > /tmp/starlight.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/ > /dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/check-live-overlook.mjs || { cat /tmp/starlight.log; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: starlight-browser-preview
+          path: test-output/
+          if-no-files-found: ignore

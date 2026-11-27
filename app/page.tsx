@@ -5,6 +5,7 @@ import { ArrowUpRight, Camera, Check, CircleHelp, Flag, Heart, Link2, Plus, Shie
 import NightSky, { type Glow, type SpecialLink, type Star } from "../components/NightSky";
 import StellarParticles from "../components/StellarParticles";
 import StarlightWalk from "../components/StarlightWalk";
+import type { LivePeer } from "../components/LiveOverlook";
 
 type SkyState = { stars: Star[]; glows: Glow[]; liveStarIds: string[]; specialLink: SpecialLink | null };
 type SkyTheme = "forest" | "violet" | "ocean" | "dawn";
@@ -53,7 +54,8 @@ export default function Home() {
   const [myStarId, setMyStarId] = useState<string | null>(null);
   const [intro, setIntro] = useState(true);
   const [sharedSeat, setSharedSeat] = useState(false);
-  const sharedCanvas = useRef<HTMLCanvasElement | null>(null);
+  const livePeers = useRef<LivePeer[]>([]);
+  const [liveReady, setLiveReady] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -383,7 +385,7 @@ export default function Home() {
     painter.drawImage(sky, 0, 0, image.width, image.height);
     if (particleCanvas.current) painter.drawImage(particleCanvas.current, 0, 0, image.width, image.height);
     if (meteorCanvas.current) painter.drawImage(meteorCanvas.current, 0, 0, image.width, image.height);
-    if (sharedCanvas.current) painter.drawImage(sharedCanvas.current, 0, 0, image.width, image.height);
+
     image.toBlob(blob => {
       if (!blob) return;
       const url = URL.createObjectURL(blob), a = document.createElement("a");
@@ -413,9 +415,9 @@ export default function Home() {
   useEffect(() => () => { audioRef.current?.close().catch(() => {}); }, []);
 
   return <main className={`observatory${sharedSeat && !activeRoom && !intro ? " shared-starlight" : ""}`}>
-    <NightSky stars={sky.stars} glows={sky.glows} specialLink={sky.specialLink} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} meteorCanvasRef={meteorCanvas} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
+    <NightSky stars={sky.stars} glows={sky.glows} specialLink={sky.specialLink} liveStarIds={sky.liveStarIds} myStarId={myStarId} selectedId={selectedId} placing={placing} showerKey={showerKey} showConstellations={showConstellations} showStarNames={showStarNames} intro={intro} theme={activeRoom?.theme || "forest"} canvasRef={skyCanvas} meteorCanvasRef={meteorCanvas} livePeers={livePeers} onLiveReady={setLiveReady} onSpot={createAt} onSelectStar={(id) => { setIntro(false); setSelectedId(id); }} />
     <StellarParticles theme={activeRoom?.theme || "forest"} canvasRef={particleCanvas} />
-    {sharedSeat && !activeRoom && !intro && <StarlightWalk canvasRef={sharedCanvas} paused={placing || !!roomPanel || showCreate || showGuide || !!selectedId} onLeave={() => setSharedSeat(false)} />}
+    {sharedSeat && !activeRoom && !intro && <StarlightWalk livePeers={livePeers} liveReady={liveReady} paused={placing || !!roomPanel || showCreate || showGuide || !!selectedId} onLeave={() => setSharedSeat(false)} />}
     <div className="film-grain" aria-hidden="true" /><div className="top-vignette" aria-hidden="true" />
     <header className="topbar">
       <button className="identity" onClick={() => { setIntro(true); setSharedSeat(false); setSelectedId(null); setPlacing(false); }} aria-label="처음 화면으로">
