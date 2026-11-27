@@ -9,16 +9,31 @@ function random(seed){return()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)
 function hash(x,z,s){let n=Math.imul(x,374761393)^Math.imul(z,668265263)^s;n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295;}
 function noise(x,z,s){let a=Math.floor(x),b=Math.floor(z),u=x-a,v=z-b;u=u*u*(3-2*u);v=v*v*(3-2*v);return (hash(a,b,s)*(1-u)+hash(a+1,b,s)*u)*(1-v)+(hash(a,b+1,s)*(1-u)+hash(a+1,b+1,s)*u)*v;}
 function fbm(x,z,s){let a=0,w=.52;for(let i=0;i<5;i++){a+=w*noise(x,z,s+i*37);x=x*1.91+3.2;z=z*2.03-1.7;w*=.48;}return a;}
-const ground=(x,z)=>-0.85+1.65*Math.exp(-Math.pow((z-4)/21,2))+.55*(fbm(x*.09,z*.09,39)-.5)+.13*Math.sin(x*.28+z*.17);
+// Continuous grassy promontory, with an irregular bank descending into the lake.
+function ground(x,z){
+  const bank=-20.5+3.6*Math.cos(x*.12)+4.1*(noise(x*.085,0,113)-.5);
+  const t=clamp((z-bank)/8,0,1),shore=t*t*(3-2*t);
+  const broad=-.72+1.42*Math.exp(-Math.pow((z-3)/24,2));
+  const detail=.32*(fbm(x*.085,z*.085,39)-.5)+.065*Math.sin(x*.28+z*.17);
+  return -2.35+shore*(2.35+broad+detail);
+}
 const fogColor=new T.Color("#354c71");
 function meshTerrain(width,depth,segments,z0,height,low,high){
+  const meadow=height===ground;
   const geo=new T.PlaneGeometry(width,depth,segments,Math.round(segments*.64));geo.rotateX(-Math.PI/2);
   const a=geo.attributes.position,col=[],c0=new T.Color(low),c1=new T.Color(high);
   for(let i=0;i<a.count;i++){
     const x=a.getX(i),z=a.getZ(i)+z0,y=height(x,z);
     a.setXYZ(i,x,y,z);
-    const shade=clamp(.18+fbm(x*.10,z*.10,17)*.46+fbm(x*.42,z*.55,79)*.17+(y+1)*.022,0,1);
-    const c=c0.clone().lerp(c1,shade);col.push(c.r,c.g,c.b);
+    const coarse=fbm(x*.075,z*.095,17),fine=fbm(x*.42,z*.55,79);
+    const shade=clamp(.18+coarse*.44+fine*.19+(meadow?0:(y+1)*.018),0,1);
+    const c=c0.clone().lerp(c1,shade);
+    if(meadow){
+      const worn=Math.exp(-Math.pow((z+3)/3.6,2))*Math.exp(-Math.pow(x/10,4));
+      c.lerp(new T.Color("#586348"),worn*.22);
+      if(y<-.9)c.lerp(new T.Color("#494a3e"),clamp((-.9-y)*.7,0,.7));
+    }
+    col.push(c.r,c.g,c.b);
   }
   geo.setAttribute("color",new T.Float32BufferAttribute(col,3));geo.computeVertexNormals();
   const material=new T.MeshStandardMaterial({vertexColors:true,roughness:.96,side:T.DoubleSide});
@@ -36,7 +51,7 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
      diffuseColor.rgb*=.73+.34*broad+.19*detail;
    `);
   };
-  material.customProgramCacheKey=()=>"natural-land-v1";
+  material.customProgramCacheKey=()=>"natural-land-v2";
   return new T.Mesh(geo,material);
 }
 // Each range has its own asymmetric ridge profile, with a broad central valley.
@@ -58,11 +73,11 @@ function mountainHeight(seed,center,amp,spread){
   const bend=(noise(x*.019,0,seed)-.5)*15+3*Math.sin(x*.037+seed);
   const dz=z-center+bend;
   const crest=ridgeProfile(x,profile)*amp;
-  const slope=dz>0?spread*1.12:spread*.80;
+  const slope=dz>0?spread*1.30:spread*.88;
   const flank=Math.exp(-Math.pow(Math.abs(dz)/slope,1.48));
-  const broad=(fbm(x*.036,z*.042,seed)-.5)*amp*.12;
+  const broad=(fbm(x*.034,z*.037,seed)-.5)*amp*.15;
   const drainage=1-Math.abs(2*fbm(x*.073+dz*.027,z*.085,seed+71)-1);
-  const rock=(fbm(x*.19,z*.19,seed+53)-.5)*amp*.045;
+  const rock=(fbm(x*.15,z*.19,seed+53)-.5)*amp*.033;
   const ravines=-(.024+.037*Math.min(1,Math.abs(dz)/spread))*amp*drainage;
   return -9+flank*(crest+broad+rock+ravines);
  };
@@ -129,9 +144,13 @@ function makeLake(){
   `,fragmentShader:`
    precision highp float;varying vec2 p;uniform float time;
    void main(){float w=sin(p.y*2.7+p.x*.41+time*.7+sin(p.x*.29+p.y*.14-time*.3)*1.6);float q=sin(p.y*5.2-p.x*.75-time*.9);
-     float glint=pow(max(0.,w*.64+q*.36),12.);float stripe=exp(-abs(p.x+sin(p.y*.19+time*.13)*2.)*.12);
-     vec3 c=mix(vec3(.017,.033,.072),vec3(.052,.084,.138),smoothstep(-40.,40.,p.y));
-     c+=vec3(.16,.21,.32)*glint*(.09+.31*stripe);gl_FragColor=vec4(c,1.);
+     float crossed=sin(p.x*1.7+p.y*3.1-time*.52+sin(p.x*.42+p.y*.33)*2.);
+     float glint=pow(max(0.,w*.53+q*.29+crossed*.18),9.);
+     float stripe=exp(-abs(p.x+sin(p.y*.19+time*.13)*2.+sin(p.y*.06)*4.)*.085);
+     float farWater=smoothstep(-40.,40.,p.y);
+     vec3 c=mix(vec3(.014,.034,.055),vec3(.039,.065,.115),farWater);
+     c+=vec3(.065,.095,.14)*(.5+.5*w)*(.11+.10*farWater);
+     c+=vec3(.20,.25,.36)*glint*(.045+.19*stripe);gl_FragColor=vec4(c,1.);
      #include <colorspace_fragment>
    }
   `});
@@ -150,15 +169,20 @@ function makeMeadow(scene,rand,small){
       transformed.x+=pow(max(0.,position.y),1.7)*(.15*sin(wind*.84+ph)+.05*sin(wind*2.1+ph*3.));
       transformed.z+=pow(max(0.,position.y),1.6)*.085*sin(wind*.69+ph);
     #endif`);};
-  const count=small?4400:8500,mesh=new T.InstancedMesh(g,m,count),o=new T.Object3D(),dark=new T.Color("#294b45"),light=new T.Color("#9caa71"),c=new T.Color();
+  const count=small?3900:7200,mesh=new T.InstancedMesh(g,m,count),o=new T.Object3D(),dark=new T.Color("#294b45"),light=new T.Color("#9caa71"),c=new T.Color();
   for(let i=0;i<count;i++){
-    let x=(rand()-.5)*43,z=-19+rand()*35;
+    let x,z,patch;
+    // Prefer irregular colonies over uniformly spaced blades.
+    for(let attempt=0;attempt<8;attempt++){
+      x=(rand()-.5)*43;z=-17+rand()*30;
+      patch=fbm(x*.21,z*.23,81);
+      if(ground(x,z)>-.9&&rand()<.18+.82*patch)break;
+    }
     const seating=Math.exp(-Math.pow((z+3.0)/3.8,2))*Math.exp(-Math.pow(x/15,4));
     const foreground=clamp((z-3)/9,0,1);
-    const patch=fbm(x*.18,z*.23,81);
     const side=clamp((Math.abs(x)-6)/13,0,1);
-    const height=(.055+Math.pow(rand(),2.5)*(.23+side*.19))*(.55+patch*.95)*(1-.72*seating)*(1-.52*foreground);
-    const width=.19+height*.75+rand()*.20;
+    const height=ground(x,z)<-.9?0:(.032+Math.pow(rand(),2.8)*(.14+side*.15))*(.62+patch*.80)*(1-.78*seating)*(1-.58*foreground);
+    const width=.11+height*.60+rand()*.11;
     o.position.set(x,ground(x,z)-.012,z);o.rotation.set(0,rand()*TAU,(rand()-.5)*.38);o.scale.set(width,height,width);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
     c.copy(dark).lerp(light,rand()*.83);mesh.setColorAt(i,c);
   }
@@ -169,7 +193,7 @@ function makeMeadow(scene,rand,small){
   const palette=["#ba9ad9","#c7d7f2","#e4bb90","#aab9e4"].map(s=>new T.Color(s));
   for(let i=0;i<flowerCount;i++){
     let x=(rand()-.5)*36,z=-15+rand()*25;if(Math.abs(z+3.0)<2.8)z+=4.0;
-    const y=ground(x,z),h=.10+rand()*.19;
+    const y=ground(x,z),h=y<-.9?0:.075+rand()*.13;
     o.position.set(x,y+h*.5,z);o.rotation.set(0,0,(rand()-.5)*.13);o.scale.set(1,h,1);o.updateMatrix();stems.setMatrixAt(i,o.matrix);
     for(let j=0;j<5;j++){let a=j*TAU/5;o.position.set(x+Math.cos(a)*.06,y+h,z+Math.sin(a)*.06);o.rotation.set(0,-a,0);o.scale.set(.90,.36,.52);o.updateMatrix();petals.setMatrixAt(i*5+j,o.matrix);petals.setColorAt(i*5+j,palette[i%4]);}
   }
@@ -260,15 +284,27 @@ function makeMemoryTree(scene,rand,small){
  let k=0;for(const tip of tips){for(let i=0;i<70;i++){o.position.copy(tip).add(new T.Vector3((rand()-.5)*.9,(rand()-.5)*.72,(rand()-.5)*.9));o.rotation.set(rand()*2,rand()*TAU,rand()*2);o.scale.set(.8+rand()*.9,.8+rand()*.7,.8+rand()*.8);o.updateMatrix();leaves.setMatrixAt(k++,o.matrix);}}
  group.add(leaves);scene.add(group);return {group,mat,leaves};
 }
+function contactShadow(radiusX,radiusZ,strength){
+  const g=new T.PlaneGeometry(radiusX*2,radiusZ*2,12,12);g.rotateX(-Math.PI/2);
+  const m=new T.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{strength:{value:strength}},vertexShader:`
+    varying vec2 coord;void main(){coord=uv*2.-1.;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
+  `,fragmentShader:`
+    varying vec2 coord;uniform float strength;void main(){float a=exp(-dot(coord,coord)*4.2);a*=1.-smoothstep(.62,1.,length(coord));gl_FragColor=vec4(.012,.018,.027,a*strength);}
+  `});
+  const mesh=new T.Mesh(g,m);mesh.renderOrder=2;
+  const p=g.attributes.position,base=Float32Array.from(p.array);
+  return {mesh,place(x,z,scale=1){mesh.position.set(x,0,z);mesh.scale.set(scale,1,scale);for(let i=0;i<p.count;i++){const px=base[i*3],pz=base[i*3+2];p.setY(i,ground(x+px*scale,z+pz*scale)+.025);}p.needsUpdate=true;g.computeBoundingSphere();},dispose(){g.dispose();m.dispose();}};
+}
+
 export function createLiveOverlook(){
  const small=window.innerWidth<760,rand=random(2261127);
  const renderer=new T.WebGLRenderer({antialias:!small,powerPreference:"high-performance",alpha:false,preserveDrawingBuffer:true});
- renderer.setPixelRatio(1);renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.22;
+ renderer.setPixelRatio(1);renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.13;
  const scene=new T.Scene();scene.fog=new T.FogExp2(fogColor,.009);
  const camera=new T.PerspectiveCamera(49,1,.1,700);camera.position.set(0,3.0,15);camera.lookAt(0,9.4,-48);
- const ambient=new T.HemisphereLight("#b7c9ff","#354a4a",2.0);scene.add(ambient);
- const moonlight=new T.DirectionalLight("#bdccff",2.1);moonlight.position.set(-16,24,-25);scene.add(moonlight);
- const rim=new T.DirectionalLight("#efbcb9",.65);rim.position.set(35,8,-40);scene.add(rim);
+ const ambient=new T.HemisphereLight("#c3d2ff","#48564b",1.60);scene.add(ambient);
+ const moonlight=new T.DirectionalLight("#c6d9ff",2.35);moonlight.position.set(-28,19,-30);scene.add(moonlight);
+ const rim=new T.DirectionalLight("#f0c5b4",.52);rim.position.set(35,8,-40);scene.add(rim);
  const sky=makeSky(),stars=makeStars(rand);scene.add(sky,stars);
  scene.add(meshTerrain(240,112,180,-142,mountainHeight(11,-143,42,29),"#263953","#8496be"));
  scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
@@ -289,7 +325,7 @@ export function createLiveOverlook(){
      lake.material.uniforms.time.value=t;wind.value=t;
      tree.mat.emissiveIntensity=.22+Math.min(1.0,count*.013)+.08*Math.sin(t*.8);
      const ids=new Set(peers.map(p=>p.id));
-     for(const [id,v] of people)if(!ids.has(id)){scene.remove(v.root);people.delete(id);v.dispose();}
+     for(const [id,v] of people)if(!ids.has(id)){scene.remove(v.root,v.shadow.mesh);people.delete(id);v.shadow.dispose();v.dispose();}
      // When seated, bring the camera closer and lower it, retaining a broad sky.
      const close=peers.length>0;
      const distance=close?(small?10.4:12.5):15;
@@ -298,12 +334,13 @@ export function createLiveOverlook(){
      camera.position.y+=(eyeY-camera.position.y)*Math.min(1,dt*3.2);
      camera.lookAt(0,close?6.0:9.4,-48);
      for(const p of peers){
-       let v=people.get(p.id);if(!v){v=createHuman(p.hue);people.set(p.id,v);scene.add(v.root);}
+       let v=people.get(p.id);if(!v){v=createHuman(p.hue);v.shadow=contactShadow(.75,.85,.58);people.set(p.id,v);scene.add(v.root,v.shadow.mesh);}
        const z=-3.0,span=2*(camera.position.z-z)*Math.tan(camera.fov*Math.PI/360)*camera.aspect;
        const x=(p.x-.5)*span*.98;
        const stagger=small&&peers.length>4?(Math.round(p.x*100)%2)*.48:0;
        v.root.position.set(x,ground(x,z-stagger)+.04,z-stagger);
        v.root.scale.setScalar(small&&peers.length>5?.86:1.06);
+       v.shadow.place(x,z-stagger,p.pose==="lie"?1.35:.95);
        v.update(p,t,Date.now(),dt,reduced);
        if(p.pose==="lie")v.root.position.y+=.22;
      }
@@ -311,6 +348,6 @@ export function createLiveOverlook(){
    }
    ctx.drawImage(renderer.domElement,0,0,width,height);return true;
  }
- function dispose(){dead=true;for(const v of people.values()){scene.remove(v.root);v.dispose();}people.clear();scene.traverse(o=>{if(o.isMesh||o.isPoints){if(o.geometry&&!o.geometry.userData.sharedHuman)o.geometry.dispose();const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>m?.dispose());}});renderer.dispose();renderer.forceContextLoss();}
+ function dispose(){dead=true;for(const v of people.values()){scene.remove(v.root,v.shadow.mesh);v.shadow.dispose();v.dispose();}people.clear();scene.traverse(o=>{if(o.isMesh||o.isPoints){if(o.geometry&&!o.geometry.userData.sharedHuman)o.geometry.dispose();const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>m?.dispose());}});renderer.dispose();renderer.forceContextLoss();}
  return {render,dispose};
 }
