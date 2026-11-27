@@ -39,17 +39,33 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
   material.customProgramCacheKey=()=>"natural-land-v1";
   return new T.Mesh(geo,material);
 }
+// Each range has its own asymmetric ridge profile, with a broad central valley.
+// Subordinate ridges descend along the slopes instead of repeating rounded hills.
+const ridgeProfiles={
+  11:[[-120,.31],[-93,.46],[-74,.39],[-52,.69],[-40,.91],[-32,.70],[-23,.61],[-13,.37],[1,.46],[17,.66],[29,.84],[38,.64],[48,.55],[64,.72],[83,.47],[120,.28]],
+  47:[[-100,.35],[-76,.52],[-57,.84],[-43,.68],[-30,.48],[-18,.30],[-5,.20],[9,.27],[23,.48],[34,.68],[47,.88],[59,.65],[75,.45],[100,.32]],
+  87:[[-80,.45],[-59,.73],[-44,.93],[-30,.68],[-20,.43],[-9,.14],[4,.09],[13,.21],[25,.47],[38,.77],[52,.87],[67,.60],[80,.39]]
+};
+function ridgeProfile(x,profile){
+ let i=0;while(i<profile.length-2&&x>profile[i+1][0])i++;
+ const [a,ha]=profile[i],[b,hb]=profile[i+1],t=clamp((x-a)/(b-a),0,1);
+ // A little rounding at the crest without turning every peak into a dome.
+ const u=.72*t+.28*t*t*(3-2*t);return ha+(hb-ha)*u;
+}
 function mountainHeight(seed,center,amp,spread){
-  return (x,z)=>{
-    const r=fbm(x*.022,z*.041,seed);
-    const folded=1-Math.abs(2*fbm(x*.055,z*.071,seed+54)-1);
-    const spine=Math.exp(-Math.pow((z-center+(noise(x*.018,0,seed)-.5)*22)/spread,2));
-    const ridgeFine=1-Math.abs(2*fbm(x*.115+noise(x*.02,z*.02,seed)*2,z*.15,seed+89)-1);
-    const erosion=1-Math.pow(1-Math.abs(2*noise(x*.085+z*.021,z*.10,seed+137)-1),2);
-    const peaks=.15+.85*Math.pow(clamp(r*.83+folded*.31,0,1),1.37);
-    const crest=amp*(peaks+.09*ridgeFine-.065*erosion);
-    return -9+spine*(crest+3.0*noise(x*.19,z*.18,seed+2));
-  };
+ const profile=ridgeProfiles[seed]||ridgeProfiles[11];
+ return (x,z)=>{
+  const bend=(noise(x*.019,0,seed)-.5)*15+3*Math.sin(x*.037+seed);
+  const dz=z-center+bend;
+  const crest=ridgeProfile(x,profile)*amp;
+  const slope=dz>0?spread*1.12:spread*.80;
+  const flank=Math.exp(-Math.pow(Math.abs(dz)/slope,1.48));
+  const broad=(fbm(x*.036,z*.042,seed)-.5)*amp*.12;
+  const drainage=1-Math.abs(2*fbm(x*.073+dz*.027,z*.085,seed+71)-1);
+  const rock=(fbm(x*.19,z*.19,seed+53)-.5)*amp*.045;
+  const ravines=-(.024+.037*Math.min(1,Math.abs(dz)/spread))*amp*drainage;
+  return -9+flank*(crest+broad+rock+ravines);
+ };
 }
 function makeSky(){
   const geo=new T.SphereGeometry(340,32,20);
@@ -134,23 +150,28 @@ function makeMeadow(scene,rand,small){
       transformed.x+=pow(max(0.,position.y),1.7)*(.15*sin(wind*.84+ph)+.05*sin(wind*2.1+ph*3.));
       transformed.z+=pow(max(0.,position.y),1.6)*.085*sin(wind*.69+ph);
     #endif`);};
-  const count=small?5700:11500,mesh=new T.InstancedMesh(g,m,count),o=new T.Object3D(),dark=new T.Color("#294b45"),light=new T.Color("#9caa71"),c=new T.Color();
+  const count=small?4400:8500,mesh=new T.InstancedMesh(g,m,count),o=new T.Object3D(),dark=new T.Color("#294b45"),light=new T.Color("#9caa71"),c=new T.Color();
   for(let i=0;i<count;i++){
-    let x=(rand()-.5)*43,z=-19+rand()*35;const clear=Math.abs(z+3.0)<1.55&&Math.abs(x)<18;
-    const height=(.20+Math.pow(rand(),1.9)*.88)*(clear?.32:1);
-    o.position.set(x,ground(x,z)-.025,z);o.rotation.set(0,rand()*TAU,(rand()-.5)*.30);o.scale.set(.5+rand()*.8,height,.8);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
+    let x=(rand()-.5)*43,z=-19+rand()*35;
+    const seating=Math.exp(-Math.pow((z+3.0)/3.8,2))*Math.exp(-Math.pow(x/15,4));
+    const foreground=clamp((z-3)/9,0,1);
+    const patch=fbm(x*.18,z*.23,81);
+    const side=clamp((Math.abs(x)-6)/13,0,1);
+    const height=(.055+Math.pow(rand(),2.5)*(.23+side*.19))*(.55+patch*.95)*(1-.72*seating)*(1-.52*foreground);
+    const width=.19+height*.75+rand()*.20;
+    o.position.set(x,ground(x,z)-.012,z);o.rotation.set(0,rand()*TAU,(rand()-.5)*.38);o.scale.set(width,height,width);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
     c.copy(dark).lerp(light,rand()*.83);mesh.setColorAt(i,c);
   }
   mesh.frustumCulled=false;scene.add(mesh);
   // Flowers are actual petal meshes; clusters have varied stem heights.
-  const flowerCount=small?170:320,petals=new T.InstancedMesh(new T.SphereGeometry(.055,7,5),new T.MeshStandardMaterial({roughness:.8}),flowerCount*5);
+  const flowerCount=small?105:210,petals=new T.InstancedMesh(new T.SphereGeometry(.055,7,5),new T.MeshStandardMaterial({roughness:.8}),flowerCount*5);
   const stems=new T.InstancedMesh(new T.CylinderGeometry(.011,.018,1,5),new T.MeshStandardMaterial({color:"#687b4c",roughness:1}),flowerCount);
   const palette=["#ba9ad9","#c7d7f2","#e4bb90","#aab9e4"].map(s=>new T.Color(s));
   for(let i=0;i<flowerCount;i++){
-    let x=(rand()-.5)*36,z=-15+rand()*25;if(Math.abs(z+3.0)<1.6)z+=3;
-    const y=ground(x,z),h=.24+rand()*.44;
+    let x=(rand()-.5)*36,z=-15+rand()*25;if(Math.abs(z+3.0)<2.8)z+=4.0;
+    const y=ground(x,z),h=.10+rand()*.19;
     o.position.set(x,y+h*.5,z);o.rotation.set(0,0,(rand()-.5)*.13);o.scale.set(1,h,1);o.updateMatrix();stems.setMatrixAt(i,o.matrix);
-    for(let j=0;j<5;j++){let a=j*TAU/5;o.position.set(x+Math.cos(a)*.06,y+h,z+Math.sin(a)*.06);o.rotation.set(0,-a,0);o.scale.set(1.4,.48,.68);o.updateMatrix();petals.setMatrixAt(i*5+j,o.matrix);petals.setColorAt(i*5+j,palette[i%4]);}
+    for(let j=0;j<5;j++){let a=j*TAU/5;o.position.set(x+Math.cos(a)*.06,y+h,z+Math.sin(a)*.06);o.rotation.set(0,-a,0);o.scale.set(.90,.36,.52);o.updateMatrix();petals.setMatrixAt(i*5+j,o.matrix);petals.setColorAt(i*5+j,palette[i%4]);}
   }
   scene.add(stems,petals);return wind;
 }
@@ -249,9 +270,9 @@ export function createLiveOverlook(){
  const moonlight=new T.DirectionalLight("#bdccff",2.1);moonlight.position.set(-16,24,-25);scene.add(moonlight);
  const rim=new T.DirectionalLight("#efbcb9",.65);rim.position.set(35,8,-40);scene.add(rim);
  const sky=makeSky(),stars=makeStars(rand);scene.add(sky,stars);
- scene.add(meshTerrain(220,100,150,-133,mountainHeight(11,-135,43,26),"#263953","#8496be"));
- scene.add(meshTerrain(180,82,128,-96,mountainHeight(47,-94,29,20),"#21354e","#56758e"));
- scene.add(meshTerrain(135,53,112,-58,mountainHeight(87,-60,14,12),"#1b313e","#456771"));
+ scene.add(meshTerrain(240,112,180,-142,mountainHeight(11,-143,42,29),"#263953","#8496be"));
+ scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
+ scene.add(meshTerrain(155,62,132,-60,mountainHeight(87,-61,17,15),"#1b313e","#456771"));
  const lake=makeLake();scene.add(lake);
  scene.add(meshTerrain(100,62,108,2,ground,"#253f40","#69865c"));
  const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeWoodland(scene,rand,small);
