@@ -23,7 +23,8 @@ jobs:
       - run: /tmp/starlight-test/node_modules/.bin/playwright install --with-deps chromium
       - name: Start local Workers runtime and test live 3D
         run: |
-          npm start > /tmp/starlight.log 2>&1 &
+          npx wrangler d1 migrations apply webecomeeachotherstar-db --local --config wrangler.cloudflare.jsonc --persist-to .wrangler/test-state
+          npx wrangler dev --config wrangler.cloudflare.jsonc --local --persist-to .wrangler/test-state --ip 127.0.0.1 --port 8787 --inspector-port 0 > /tmp/starlight.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8787/ > /dev/null; then break; fi
             sleep 1
