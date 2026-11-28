@@ -24,7 +24,14 @@ function ground(x,z){
  const broad=-.72+1.42*Math.exp(-Math.pow((z-3)/24,2));
  const detail=.32*(fbm(x*.085,z*.085,39)-.5)+.065*Math.sin(x*.28+z*.17);
  const bankDetail=Math.sin(Math.PI*t)*(.16*(fbm(x*.30,z*.35,273)-.5)+.08*(noise(x*.75,z*.56,83)-.5));
- return -2.35+shore*(2.35+broad+detail)+bankDetail;
+ // Soft asymmetric undulations only in the transition toward the river.
+ // The water level and seating area remain unchanged.
+ const inland=1-Math.exp(-Math.pow((z-nearBank(x))/5.5,2));
+ const band=Math.exp(-Math.pow((z+9.5)/5.8,2));
+ const seating=Math.exp(-Math.pow((z+3)/3.4,2))*Math.exp(-Math.pow(x/12,4));
+ const waves=.24*Math.sin(x*.21+z*.17)+.13*Math.sin(x*.44-z*.31)+.22*(fbm(x*.105,z*.12,913)-.5);
+ const mound=.19*Math.exp(-Math.pow((x-9)/8.2,2))+ .14*Math.exp(-Math.pow((x+16)/7.3,2));
+ return -2.35+shore*(2.35+broad+detail)+bankDetail+inland*band*(1-.9*seating)*(waves+mound);
 }
 function distantBank(x,z){
  const d=farBank(x)-z,t=clamp((d+2.2)/8.0,0,1),r=t*t*(3-2*t);
@@ -453,7 +460,9 @@ function makeMeadow(scene,rand,small){
    const y=heightAt(x,z);if(y<-.95)continue;
    const seating=Math.exp(-Math.pow((z+3)/3.1,2))*Math.exp(-Math.pow(x/12,4));
    const broad=noise(x*.20,z*.24,87),far=1-smoothstepLocal(-18,-8,z);
-   const h=(.12+.12*Math.pow(r(),1.25))*(.90+.18*broad)*(1-.35*seating)*(1-.28*far);
+   const transition=Math.exp(-Math.pow((z+10)/5.6,2));
+   const swath=noise(x*.22,z*.31,842);
+   const h=(.12+.12*Math.pow(r(),1.25))*(.90+.18*broad)*(1-.35*seating)*(1-.28*far)*(1+transition*(swath-.35)*.38);
    list.push([x,y,z,h,broad]);
   }
   const mesh=new T.InstancedMesh(lawnPatch(717+k*97,zone.detail,zone.leaves),mat,list.length);
@@ -465,13 +474,41 @@ function makeMeadow(scene,rand,small){
    o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
    const coarse=fbm(x*.075,z*.095,17),fine=noise(x*.42,z*.55,79);
    const blend=clamp(.31+coarse*.40+fine*.08+(r()-.5)*.19,0,1);
-   c.copy(deep).lerp(green,blend).multiplyScalar(.86+.17*broad);mesh.setColorAt(i,c);
+   const transition=Math.exp(-Math.pow((z+10)/5.6,2));
+   const damp=clamp((z-nearBank(x)-3)/9,0,1);
+   const swath=noise(x*.18,z*.21,842);
+   c.copy(deep).lerp(green,blend).multiplyScalar((.86+.17*broad)*(1+transition*(swath-.5)*.12-.07*transition*(1-damp)));mesh.setColorAt(i,c);
   }
   mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;
   mesh.computeBoundingSphere();mesh.frustumCulled=false;scene.add(mesh);
  }
  return wind;
 }
+// Sparse low riverbank growth, in small naturally clustered patches only.
+// Uses the same geometric grass blades and standard material as the meadow.
+function makeFieldTransition(scene,small){
+ const r=random(55491),o=new T.Object3D(),items=[];
+ const centers=[[-26,7],[-18,9],[-10,7.2],[3.5,8.0],[13,6.5],[22,7.8],[30,6.0]];
+ for(const [cx,offset] of centers){
+  const count=small?18:32;
+  for(let j=0;j<count;j++){
+   const x=cx+(r()-.5)*3.8,z=nearBank(x)+offset+(r()-.5)*2.5;
+   const y=ground(x,z);if(y<-.80||z>-6)continue;
+   items.push([x,y,z,.13+.17*r(),r()]);
+  }
+ }
+ const g=lawnPatch(1307,3,9);
+ const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
+ const mesh=new T.InstancedMesh(g,mat,items.length),dark=new T.Color("#315326"),light=new T.Color("#668a41");
+ items.forEach(([x,y,z,h,t],i)=>{
+  o.position.set(x,y-.018,z);o.rotation.set(0,r()*TAU,0);
+  const width=.17+r()*.12;o.scale.set(width,h,width);o.updateMatrix();
+  mesh.setMatrixAt(i,o.matrix);mesh.setColorAt(i,dark.clone().lerp(light,t*.65));
+ });
+ mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+ mesh.computeBoundingSphere();scene.add(mesh);
+}
+
 // Low weathered rocks, embedded in the earth, with procedural mineral and moss colors.
 // Small broadleaf ground cover provides an organic transition from lawn to woodland.
 // Riparian detail follows the actual water height rather than a straight strip.
@@ -815,7 +852,7 @@ export function createLiveOverlook(){
  scene.add(makeFarBank());
  const lake=makeLake(small);scene.add(lake.mesh);
  scene.add(meshTerrain(140,100,small?180:220,21,ground,"#264b23","#608b40"));
- const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeRiverEdges(scene,small);
+ const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeRiverEdges(scene,small);makeFieldTransition(scene,small);
  const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);makeWoodland(scene,rand,small,true);
  for(const object of scene.children)if(!beforeForest.has(object))object.layers.enable(1);
  const mist=makeValleyMist();scene.add(mist);
