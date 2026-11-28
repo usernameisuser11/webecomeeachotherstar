@@ -17,7 +17,8 @@ function nearBank(x){
  return -20.8+2.8*Math.cos(x*.094+.48)+1.15*Math.sin(x*.218)+(noise(x*.095,0,113)-.5)*2.4;
 }
 function farBank(x){
- return -43.0+4.1*Math.sin(x*.071-.55)+1.7*Math.sin(x*.16+1.2)+(noise(x*.065,0,192)-.5)*2.2;
+ return -43.0+4.1*Math.sin(x*.071-.55)+1.7*Math.sin(x*.16+1.2)+(noise(x*.065,0,192)-.5)*2.2
+  -2.1*Math.exp(-Math.pow((x-5)/13,2))+.95*Math.sin(x*.27+.8);
 }
 function ground(x,z){
  const t=clamp((z-nearBank(x))/8.5,0,1),shore=t*t*(3-2*t);
@@ -41,7 +42,10 @@ function distantBank(x,z){
  const inland=clamp((d-5)/13,0,1),fade=inland*inland*(3-2*inland);
  const shoulder=Math.exp(-Math.pow((d-17)/16,2));
  const mounds=.15+1.65*fbm(x*.055,z*.077,611)+.53*noise(x*.105,z*.095,774);
- return -2.2+r*(1.65+terrain)+Math.sin(Math.PI*t)*.19*(fbm(x*.28,z*.29,193)-.5)+fade*shoulder*mounds;
+ // Separate ridges and gullies interrupt the formerly continuous low wall.
+ const relief=smoothstepLocal(4.5,11,d)*Math.exp(-Math.pow((d-12)/13,2));
+ const ridges=.48*Math.sin(x*.145+z*.22)+.27*Math.sin(x*.30-z*.12)+.40*(fbm(x*.18,z*.22,815)-.5);
+ return -2.2+r*(1.65+terrain)+Math.sin(Math.PI*t)*.19*(fbm(x*.28,z*.29,193)-.5)+fade*shoulder*mounds+relief*ridges;
 }
 const fogColor=new T.Color("#354c71");
 // Shared, restrained meadow lighting. Green albedo is not overwritten by the
@@ -275,19 +279,21 @@ function smoothstepLocal(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t
 function farBankTint(x,z,y){
  const d=farBank(x)-z,moisture=smoothstepLocal(.02,.98,y-WATER_LEVEL);
  const shade=fbm(x*.13,z*.15,49),swath=noise(x*.085,z*.10,431);
- const wet=new T.Color("#344630"),grass=new T.Color("#526f3d"),deep=new T.Color("#344f36");
- const c=wet.lerp(grass,moisture*(.44+.47*shade));
- c.lerp(deep,.12+.22*swath+.27*smoothstepLocal(12,48,d));
+ const wet=new T.Color("#354b37"),grass=new T.Color("#55794b"),deep=new T.Color("#2d4a3e");
+ const c=wet.lerp(grass,moisture*(.34+.57*shade));
+ const meadowPatch=noise(x*.23,z*.28,619);
+ c.lerp(deep,.10+.28*swath+.25*smoothstepLocal(12,48,d));
+ c.lerp(new T.Color("#65834c"),moisture*.28*smoothstepLocal(.48,.82,meadowPatch));
  const dx=(distantBank(x+.3,z)-distantBank(x-.3,z))/.6;
  const dz=(distantBank(x,z+.3)-distantBank(x,z-.3))/.6;
- const normalLight=clamp((1+.31*dx+.42*dz)/Math.sqrt(1+dx*dx+dz*dz),.70,1.16);
- c.multiplyScalar(normalLight*(.89+.17*noise(x*.36,z*.29,553)));
+ const normalLight=clamp((1-.44*dx+.55*dz)/Math.sqrt(1+dx*dx+dz*dz),.64,1.19);
+ c.multiplyScalar(normalLight*(.83+.25*noise(x*.36,z*.29,553)));
  const haze=smoothstepLocal(36,115,Math.hypot(x,z-15));
  c.lerp(new T.Color("#3a5051"),.13+.25*haze);
  return c;
 }
 function makeFarBank(small){
- const nx=small?180:240,nz=small?80:112;
+ const nx=small?200:260,nz=small?88:120;
  const g=new T.PlaneGeometry(198,65,nx,nz);g.rotateX(-Math.PI/2);
  const p=g.attributes.position,colors=[];
  for(let i=0;i<p.count;i++){
@@ -354,19 +360,21 @@ function makeLake(small){
    vec3 refl=texture2D(reflection,sampleUV).rgb*.62;
    refl+=texture2D(reflection,sampleUV+vec2(.0018,.0023)).rgb*.19;
    refl+=texture2D(reflection,sampleUV-vec2(.0018,.0023)).rgb*.19;
-   vec3 shallow=vec3(.021,.034,.030),deepColor=vec3(.009,.020,.033);
+   vec3 shallow=vec3(.020,.035,.030),deepColor=vec3(.008,.022,.030);
    vec3 base=mix(shallow,deepColor,deep);
-   float reflectionMix=fresnel*reflectionReady*inside*(.20+.43*deep);
+   float reflectionMix=fresnel*reflectionReady*inside*(.29+.51*deep);
    vec3 color=mix(base,refl*vec3(.66,.77,.83),reflectionMix);
    float glint=pow(max(0.,a*.48+b*.34+c*.18),21.);
    float patch=.55+.45*sin(flow*.094+p.y*.16+1.6*drift);
-   color+=vec3(.046,.073,.103)*glint*patch*deep*(.25+.75*fresnel);
+   color+=vec3(.061,.087,.108)*glint*patch*deep*(.30+.70*fresnel);
+   float ripple=pow(max(0.,sin(flow*.39+p.y*5.2+1.3*sin(flow*.23))),17.);
+   color+=vec3(.012,.024,.030)*ripple*deep*(.4+.6*patch);
    float shoreline=exp(-pow((depthFade-.075)*17.,2.));
    float brokenEdge=smoothstep(.0,.8,.5+.5*sin(p.x*1.7+sin(p.x*.42+p.y)*2.6));
    color+=vec3(.009,.014,.013)*shoreline*brokenEdge*(.65+.35*a);
    // Match distant water to the same atmosphere as the adjacent terrain.
    float dist=length(cameraPosition-world),haze=1.-exp(-dist*dist*.000081);
-   color=mix(color,riverFog,haze*.44);
+   color=mix(color,riverFog,haze*.29);
    gl_FragColor=vec4(color,1.);
    #include <tonemapping_fragment>
    #include <colorspace_fragment>
@@ -525,7 +533,7 @@ function makeDistantGroundCover(scene,small){
  const mountain=mountainHeight(87,-61,17,15);
  const g=lawnPatch(811,2,7);
  const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
- const spacing=small?.74:.53;
+ const spacing=small?.62:.43;
  for(let x0=-58;x0<58;x0+=spacing){
   for(let d0=3.4;d0<17.0;d0+=spacing){
    const x=x0+r()*spacing,d=d0+r()*spacing,z=farBank(x)-d;
@@ -533,9 +541,9 @@ function makeDistantGroundCover(scene,small){
    // Never put grass over a mountain surface or in the water.
    if(y<WATER_LEVEL+.30||mountain(x,z)>y-.12)continue;
    const patch=noise(x*.20,z*.24,591);
-   const fade=smoothstepLocal(3.4,6.1,d)*(1-smoothstepLocal(12,17,d));
-   if(r()>fade*(.50+.45*patch))continue;
-   items.push([x,y,z,(.10+.11*r())*(.65+.35*fade),patch]);
+   const fade=smoothstepLocal(3.4,5.5,d)*(1-smoothstepLocal(13,17,d));
+   if(r()>fade*(.69+.29*patch))continue;
+   items.push([x,y,z,(.13+.13*r())*(.65+.35*fade),patch]);
   }
  }
  if(!items.length){g.dispose();mat.dispose();return;}
@@ -544,7 +552,32 @@ function makeDistantGroundCover(scene,small){
   o.position.set(x,y-.045,z);o.rotation.set(0,r()*TAU,0);
   const w=spacing*(.65+r()*.14);o.scale.set(w,h,w);o.updateMatrix();
   mesh.setMatrixAt(i,o.matrix);
-  mesh.setColorAt(i,farBankTint(x,z,y).multiplyScalar(.94+.12*p));
+  mesh.setColorAt(i,farBankTint(x,z,y).multiplyScalar(.92+.21*p));
+ });
+ mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+ mesh.computeBoundingSphere();mesh.layers.enable(1);scene.add(mesh);
+}
+
+function makeFarShoreStones(scene,small){
+ const r=random(136172),o=new T.Object3D(),sites=[];
+ const g=new T.IcosahedronGeometry(1,2),p=g.attributes.position;
+ for(let i=0;i<p.count;i++){
+  const x=p.getX(i),y=p.getY(i),z=p.getZ(i),k=.76+.31*fbm(x*2.6,z*2.2+y,519);
+  p.setXYZ(i,x*k,y*k,z*k);
+ }
+ g.computeVertexNormals();
+ const n=small?30:55,groups=[-31,-14,9,28,42];
+ for(let i=0;i<n;i++){
+  const x=groups[i%groups.length]+(r()-.5)*9.5,z=farBank(x)-3.7-r()*3.9,y=distantBank(x,z);
+  if(y<WATER_LEVEL+.10||y>.50)continue;
+  sites.push([x,y,z,.12+Math.pow(r(),2)*.31]);
+ }
+ const mat=new T.MeshStandardMaterial({color:"#ffffff",roughness:1,side:T.DoubleSide});
+ const mesh=new T.InstancedMesh(g,mat,sites.length),a=new T.Color("#4e6254"),b=new T.Color("#777d68");
+ sites.forEach(([x,y,z,size],i)=>{
+  o.position.set(x,y-.04,z);o.rotation.set(r()*.35,r()*TAU,r()*.20);
+  o.scale.set(size*(1.3+r()*.5),size*.45,size*(.7+r()*.4));o.updateMatrix();
+  mesh.setMatrixAt(i,o.matrix);mesh.setColorAt(i,a.clone().lerp(b,r()*.75));
  });
  mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
  mesh.computeBoundingSphere();mesh.layers.enable(1);scene.add(mesh);
@@ -913,7 +946,7 @@ export function createLiveOverlook(){
  scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
  scene.add(meshTerrain(155,62,132,-60,mountainHeight(87,-61,17,15),"#1b313e","#456771"));
  for(const object of scene.children)if(object.isMesh||object.isLight)object.layers.enable(1);
- scene.add(makeFarBank(small));makeDistantGroundCover(scene,small);
+ scene.add(makeFarBank(small));makeDistantGroundCover(scene,small);makeFarShoreStones(scene,small);
  const lake=makeLake(small);scene.add(lake.mesh);
  scene.add(meshTerrain(140,100,small?180:220,21,ground,"#264b23","#608b40"));
  const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeRiverEdges(scene,small);makeFieldTransition(scene,small);
