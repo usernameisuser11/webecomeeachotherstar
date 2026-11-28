@@ -23,12 +23,13 @@ function ground(x,z){
  const t=clamp((z-nearBank(x))/8.5,0,1),shore=t*t*(3-2*t);
  const broad=-.72+1.42*Math.exp(-Math.pow((z-3)/24,2));
  const detail=.32*(fbm(x*.085,z*.085,39)-.5)+.065*Math.sin(x*.28+z*.17);
- return -2.35+shore*(2.35+broad+detail);
+ const bankDetail=Math.sin(Math.PI*t)*(.16*(fbm(x*.30,z*.35,273)-.5)+.08*(noise(x*.75,z*.56,83)-.5));
+ return -2.35+shore*(2.35+broad+detail)+bankDetail;
 }
 function distantBank(x,z){
  const d=farBank(x)-z,t=clamp((d+2.2)/8.0,0,1),r=t*t*(3-2*t);
  const terrain=.30+1.10*fbm(x*.10,z*.13,319)+.18*Math.sin(x*.18+z*.23);
- return -2.2+r*(1.65+terrain);
+ return -2.2+r*(1.65+terrain)+Math.sin(Math.PI*t)*.19*(fbm(x*.28,z*.29,193)-.5);
 }
 const fogColor=new T.Color("#354c71");
 function meshTerrain(width,depth,segments,z0,height,low,high){
@@ -170,8 +171,23 @@ function makeFarBank(){
   colors.push(tone.r,tone.g,tone.b);
  }
  g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.computeVertexNormals();
- const m=new T.Mesh(g,new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}));
- m.layers.enable(1);return m;
+ const material=new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide});
+ material.onBeforeCompile=shader=>{
+  shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nvarying vec3 bankPosition;").replace("#include <begin_vertex>","#include <begin_vertex>\nbankPosition=position;");
+  shader.fragmentShader=shader.fragmentShader.replace("#include <common>",`#include <common>
+   varying vec3 bankPosition;
+   float bankNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+    vec4 h=fract(sin(vec4(dot(i,vec2(127.1,311.7)),dot(i+vec2(1.,0.),vec2(127.1,311.7)),dot(i+vec2(0.,1.),vec2(127.1,311.7)),dot(i+1.,vec2(127.1,311.7))))*43758.5453);
+    return mix(mix(h.x,h.y,f.x),mix(h.z,h.w,f.x),f.y);}
+  `).replace("#include <color_fragment>",`#include <color_fragment>
+   float silt=1.-smoothstep(-1.43,-.62,bankPosition.y);
+   float grain=bankNoise(bankPosition.xz*3.5)*.6+bankNoise(bankPosition.xz*11.)*.4;
+   diffuseColor.rgb*=mix(.82,1.15,grain);
+   diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.84,.89,.83),silt*.32);
+  `);
+ };
+ material.customProgramCacheKey=()=>"river-bank-sediment-v1";
+ const m=new T.Mesh(g,material);m.layers.enable(1);return m;
 }
 // The water is a curving ribbon, not a rectangular plane extending to the horizon.
 function riverGeometry(small){
@@ -208,45 +224,51 @@ function makeLake(small){
   uniform sampler2D reflection;uniform float time,reflectionReady;uniform vec3 riverFog;
   void main(){
    vec2 p=world.xz;
-   float drift=sin(p.x*.15+p.y*.09);
-   float a=sin(p.x*.28+p.y*1.1+time*.38+1.45*drift);
-   float b=sin(p.x*.72-p.y*2.5-time*.32+sin(p.x*.19)*1.2);
-   float c=sin(p.x*.18+p.y*4.1+time*.21+sin(p.y*.16)*1.5);
+   float flow=p.x-time*.35;
+   float drift=sin(flow*.15+p.y*.09);
+   float q1=flow*.28+p.y*1.1+1.45*drift;
+   float q2=flow*.72-p.y*2.5+sin(flow*.19)*1.2;
+   float q3=flow*.18+p.y*4.1+sin(p.y*.16)*1.5;
+   float a=sin(q1),b=sin(q2),c=sin(q3);
+   vec2 slope=vec2(.28*cos(q1)+.24*cos(q2)+.06*cos(q3),1.1*cos(q1)-.84*cos(q2)+.85*cos(q3));
    float deep=smoothstep(.035,.95,depthFade);
    vec3 v=normalize(cameraPosition-world);
-   float fresnel=.16+.62*pow(1.-clamp(v.y,0.,1.),3.7);
+   vec3 surfaceNormal=normalize(vec3(-slope.x*.013,1.,-slope.y*.008));
+   float fresnel=.14+.64*pow(1.-clamp(dot(v,surfaceNormal),0.,1.),3.7);
    vec2 uv=reflected.xy/max(.0001,reflected.w)*.5+.5;
-   uv+=vec2(a*.0012+b*.0006,.0019*a+.0007*c)*deep;
+   uv+=vec2(slope.x*.0017,slope.y*.0014)*deep;
    float inside=step(.001,uv.x)*step(uv.x,.999)*step(.001,uv.y)*step(uv.y,.999)*step(.0001,reflected.w);
    vec2 sampleUV=clamp(uv,vec2(.005),vec2(.995));
    vec3 refl=texture2D(reflection,sampleUV).rgb*.62;
    refl+=texture2D(reflection,sampleUV+vec2(.0018,.0023)).rgb*.19;
    refl+=texture2D(reflection,sampleUV-vec2(.0018,.0023)).rgb*.19;
-   vec3 shallow=vec3(.027,.042,.040),deepColor=vec3(.010,.024,.039);
+   vec3 shallow=vec3(.021,.034,.030),deepColor=vec3(.009,.020,.033);
    vec3 base=mix(shallow,deepColor,deep);
    float reflectionMix=fresnel*reflectionReady*inside*(.20+.43*deep);
    vec3 color=mix(base,refl*vec3(.66,.77,.83),reflectionMix);
-   float glint=pow(max(0.,a*.48+b*.34+c*.18),17.);
-   color+=vec3(.055,.082,.105)*glint*deep*(.25+.75*fresnel);
+   float glint=pow(max(0.,a*.48+b*.34+c*.18),21.);
+   float patch=.55+.45*sin(flow*.094+p.y*.16+1.6*drift);
+   color+=vec3(.046,.073,.103)*glint*patch*deep*(.25+.75*fresnel);
    float shoreline=exp(-pow((depthFade-.075)*17.,2.));
    float brokenEdge=smoothstep(.0,.8,.5+.5*sin(p.x*1.7+sin(p.x*.42+p.y)*2.6));
    color+=vec3(.009,.014,.013)*shoreline*brokenEdge*(.65+.35*a);
    // Match distant water to the same atmosphere as the adjacent terrain.
    float dist=length(cameraPosition-world),haze=1.-exp(-dist*dist*.000081);
-   color=mix(color,riverFog,haze*.58);
+   color=mix(color,riverFog,haze*.44);
    gl_FragColor=vec4(color,1.);
    #include <tonemapping_fragment>
    #include <colorspace_fragment>
   }`});
  const mesh=new T.Mesh(riverGeometry(small),mat);
  mesh.rotation.x=Math.PI/2;mesh.position.set(0,level,0);
- let last=-Infinity,lastAspect=0;
+ let last=-Infinity,lastAspect=0;const lastCamera=new T.Vector3(Infinity,0,0),lastDirection=new T.Vector3();
  function reflect(renderer,scene,camera,ms){
-  if(ms-last<220&&Math.abs(camera.aspect-lastAspect)<.01)return;
-  last=ms;lastAspect=camera.aspect;
+  camera.updateMatrixWorld(true);camera.getWorldDirection(direction);
+  const moved=lastCamera.distanceToSquared(camera.position)>.015||lastDirection.distanceToSquared(direction)>.00004;
+  if(ms-last<(moved?110:420)&&Math.abs(camera.aspect-lastAspect)<.01)return;
+  last=ms;lastAspect=camera.aspect;lastCamera.copy(camera.position);lastDirection.copy(direction);
   const width=small?320:600,height=Math.max(140,Math.min(small?520:580,Math.round(width/camera.aspect)));
   if(target.width!==width||target.height!==height)target.setSize(width,height);
-  camera.updateMatrixWorld(true);camera.getWorldDirection(direction);
   mirror.position.copy(camera.position);mirror.position.y=2*level-camera.position.y;
   direction.y=-direction.y;mirror.up.set(0,-1,0);
   focus.copy(mirror.position).add(direction);mirror.lookAt(focus);
