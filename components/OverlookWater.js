@@ -76,7 +76,7 @@ export function makeRiver({small,nearBank,farBank,ground,foothill,level,fogColor
    float fresnel = .07 + .87*pow(1.-clamp(dot(n,v),0.,1.),3.4);
    float bedPattern = .5 + .5*sin(p.x*1.8 + drift*3. + sin(p.y*1.7));
    vec3 gravel = mix(vec3(.020,.027,.020),vec3(.039,.047,.033),bedPattern);
-   vec3 water = mix(gravel,vec3(.008,.016,.023),depth);
+   vec3 water = mix(gravel,vec3(.010,.020,.026),depth);
    vec2 uv = vMirror.xy/max(.001,vMirror.w)*.5+.5;
    uv += slope*vec2(.0046,.0032)*(.25+.75*depth);
    float inside = smoothstep(0.,.012,uv.x)*smoothstep(0.,.012,1.-uv.x)
@@ -87,7 +87,8 @@ export function makeRiver({small,nearBank,farBank,ground,foothill,level,fogColor
    }
    float glint = pow(max(0.,sin(a)*.5+sin(b)*.33+sin(c)*.17*fine),9.);
    float moon = gaussian((p.x+p.y*.20+9.)*.062);
-   water += vec3(.054,.075,.112)*glint*moon*fresnel*depth*.52;
+   float swell = .5+.5*sin(p.x*.41+p.y*.34-time*.35+drift*2.8);
+   water += vec3(.079,.106,.147)*glint*(.16+.84*moon)*fresnel*depth*(.48+.52*swell);
    float margin = gaussian((vDepth-.064)*18.);
    water += vec3(.010,.014,.011)*margin*smoothstep(.25,.9,.5+.5*sin(a+drift*4.));
    float dist = length(cameraPosition-vWorld);

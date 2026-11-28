@@ -42,7 +42,10 @@ function distantBank(x,z){
  const swale=fbm(x*.073-z*.043,z*.104,319);
  const terrace=1-Math.abs(2*fbm(x*.089,z*.119,611)-1);
  const rolls=1.6*swale+.36*Math.sin(x*.23+z*.27)+.57*noise(x*.115,z*.105,774);
- const foothills=smoothstepLocal(4,18,d)*(1-smoothstepLocal(41,73,d))*(.45+1.33*terrace+rolls);
+ const westShoulder=1.45*Math.exp(-Math.pow((x+18+d*.36)/10,2)-Math.pow((d-18)/10,2));
+ const eastShoulder=2.10*Math.exp(-Math.pow((x-15-d*.29)/12,2)-Math.pow((d-22)/11,2));
+ const foothills=smoothstepLocal(4,18,d)*(1-smoothstepLocal(41,73,d))
+  *(.41+1.31*terrace+rolls+westShoulder+eastShoulder);
  const bankDetail=.21*(fbm(x*.29,z*.37,193)-.48)*smoothstepLocal(0,3,d);
  return WATER_LEVEL+ledge+foothills+bankDetail;
 }
@@ -211,7 +214,34 @@ function makeFarBank(small){
   colors.push(c.r,c.g,c.b);
  }
  g.setAttribute("color",new T.Float32BufferAttribute(colors,3));
- const mesh=new T.Mesh(g,new T.MeshBasicMaterial({vertexColors:true,toneMapped:false,fog:false}));
+ const material=new T.MeshBasicMaterial({vertexColors:true,toneMapped:false,fog:false});
+ material.onBeforeCompile=shader=>{
+  shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nvarying vec3 bankPosition;")
+   .replace("#include <begin_vertex>","#include <begin_vertex>\nbankPosition=position;");
+  shader.fragmentShader=shader.fragmentShader.replace("#include <common>",`#include <common>
+ varying vec3 bankPosition;
+ float bankHash(vec2 p){
+  vec3 q=fract(p.xyx*vec3(.1031,.1030,.0973));
+  q+=dot(q,q.yzx+23.33);
+  return fract((q.x+q.y)*q.z);
+ }
+ float bankNoise(vec2 p){
+  vec2 i=floor(p),f=fract(p);
+  f=f*f*(3.-2.*f);
+  return mix(mix(bankHash(i),bankHash(i+vec2(1.,0.)),f.x),
+             mix(bankHash(i+vec2(0.,1.)),bankHash(i+vec2(1.)),f.x),f.y);
+ }
+`)
+   .replace("#include <color_fragment>",`#include <color_fragment>
+    vec2 p=bankPosition.xz;
+    float soil=bankNoise(vec2(p.x*.44+p.y*.32,p.y*.75));
+    float grain=bankNoise(vec2(p.x*2.1-p.y*.31,p.y*1.34));
+    float filter=1.-smoothstep(.15,.68,length(fwidth(p)));
+    diffuseColor.rgb*=(.81+.38*soil)*mix(1.,.88+.24*grain,filter);
+   `);
+ };
+ material.customProgramCacheKey=()=>"river-foothill";
+ const mesh=new T.Mesh(g,material);
  mesh.layers.enable(1);
  return mesh;
 }
@@ -298,20 +328,22 @@ function shadeTerrainAtTrees(mesh,roots){
 }
 function makeMeadow(scene,small,heightAt,roots,wind){
  const r=random(923781),o=new T.Object3D();
+ const up=new T.Vector3(0,1,0),normal=new T.Vector3();
  // Three.js' standard instancing path handles geometry and colors; no custom
  // instancing shader declarations. The only addition is gentle root-fixed wind.
  const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
  mat.onBeforeCompile=shader=>{
   shader.uniforms.turfWind=wind;
-  shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nuniform float turfWind;\nattribute float bladeFlex;")
-   .replace("#include <begin_vertex>",`#include <begin_vertex>
-    #ifdef USE_INSTANCING
-     vec2 q=instanceMatrix[3].xz;
-     float gust=.70*sin(turfWind*.81-dot(q,vec2(.27,.34)))+.30*sin(turfWind*1.31+q.x*.53-q.y*.39);
-     transformed.x+=bladeFlex*bladeFlex*.089*gust;
-     transformed.z+=bladeFlex*bladeFlex*.052*gust;
-    #endif
-   `);
+  shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nuniform float turfWind;\nattribute float bladeFlex;");
+  const project=T.ShaderChunk.project_vertex.replace("mvPosition = modelViewMatrix",`
+   vec2 q=instanceMatrix[3].xz;
+   float gust=.71*sin(turfWind*.81-dot(q,vec2(.27,.34)))+.29*sin(turfWind*1.31+q.x*.53-q.y*.39);
+   float flex=bladeFlex*bladeFlex*length(instanceMatrix[1].xyz);
+   mvPosition.x+=.17*flex*gust;
+   mvPosition.z+=.108*flex*gust;
+   mvPosition = modelViewMatrix
+  `);
+  shader.vertexShader=shader.vertexShader.replace("#include <project_vertex>",project);
  };
  mat.customProgramCacheKey=()=>"visible-grass-basic-v1";
  const deep=new T.Color("#305324"),green=new T.Color("#679845"),c=new T.Color();
@@ -343,7 +375,10 @@ function makeMeadow(scene,small,heightAt,roots,wind){
   for(let i=0;i<list.length;i++){
    const [x,y,z,h,broad]=list[i];
    const yaw=r()*TAU;
-   o.position.set(x,y-.008,z);o.rotation.set(0,yaw,0);
+   o.position.set(x,y-.013,z);
+   normal.set(heightAt(x-.14,z)-heightAt(x+.14,z),.28,heightAt(x,z-.14)-heightAt(x,z+.14)).normalize();
+   o.quaternion.setFromUnitVectors(up,normal);
+   o.rotateY(yaw);
    o.scale.set(zone.step*(.66+r()*.12),h,zone.step*(.66+r()*.12));
    o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
    const coarse=fbm(x*.075,z*.095,17),fine=noise(x*.42,z*.55,79);
@@ -583,7 +618,7 @@ function makeWoodland(scene,small,heightAt,wind,distant=false){
   if(y<WATER_LEVEL+.53||(!distant&&Math.hypot(x-memoryX,z+10.8)<3.5))return;
   roots.push({x,z,radius:height*.47});
   data.baseY=y;
-  const spread=height*(.32+r()*.08),lean=(r()-.5)*height*.16,leanZ=(r()-.5)*height*.10;
+  const spread=height*((distant?.44:.32)+r()*.11),lean=(r()-.5)*height*.16,leanZ=(r()-.5)*height*.10;
   const base=new T.Vector3(x,y-.074,z),mid=new T.Vector3(x+lean*.24,y+height*.32,z+leanZ*.25);
   const tip=new T.Vector3(x+lean,y+height*.70,z+leanZ);
   const trunk=curveOf(base,mid,tip);
@@ -639,7 +674,7 @@ function makeWoodland(scene,small,heightAt,wind,distant=false){
      if(placed.some(q=>Math.hypot(q[0]-x,q[1]-z)<2.4))continue;
      const y=heightAt(x,z);
      if(y<WATER_LEVEL+.46||mountains(x,z)>y-.09)continue;
-     const h=.9+Math.pow(r(),1.3)*1.85;
+     const h=1.20+Math.pow(r(),1.4)*1.86;
      placed.push([x,z]);makeTree(x,z,h,++seed);break;
     }
    }
@@ -651,19 +686,19 @@ function makeWoodland(scene,small,heightAt,wind,distant=false){
  scene.add(branches);
  // Small folded, oval leaves, geometrically rendered with standard instance
  // colors. Use many overlapping leaves instead of balls, disks or image cards.
- const p=[],idx=[],cols=[];
- for(let i=0;i<=4;i++){
-  const t=i/4,w=.47*Math.pow(Math.sin(t*Math.PI),.85),y=t-.5,fold=.13*Math.sin(t*Math.PI);
+ const p=[],idx=[],cols=[],segments=distant?2:4;
+ for(let i=0;i<=segments;i++){
+  const t=i/segments,w=.47*Math.pow(Math.sin(t*Math.PI),.85),y=t-.5,fold=.13*Math.sin(t*Math.PI);
   p.push(-w,y,0,0,y,fold,w,y,0);
   cols.push(.79,.85,.76,1.04,1.07,.96,.87,.93,.83);
-  if(i<4){const k=i*3;idx.push(k,k+1,k+3,k+1,k+4,k+3,k+1,k+2,k+4,k+2,k+5,k+4);}
+  if(i<segments){const k=i*3;idx.push(k,k+1,k+3,k+1,k+4,k+3,k+1,k+2,k+4,k+2,k+5,k+4);}
  }
  const g=new T.BufferGeometry();
  g.setAttribute("position",new T.Float32BufferAttribute(p,3));
  g.setAttribute("color",new T.Float32BufferAttribute(cols,3));
  g.setIndex(idx);g.computeVertexNormals();
  const m=treeWind(new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:true}),wind,true);
- const countPer=distant?(small?10:15):(small?23:35);
+ const countPer=distant?(small?21:28):(small?23:35);
  const heights=new Float32Array(clusters.length*countPer);
  const mesh=new T.InstancedMesh(g,m,clusters.length*countPer);
  let i=0;
@@ -773,8 +808,9 @@ function makeValleyMist(){
   void main(){
    float x=vUv.x,y=vUv.y;
    float envelope=sin(y*3.14159265)*smoothstep(0.,.12,x)*(1.-smoothstep(.88,1.,x));
-   float drift=.50+.25*sin(x*36.-time*.10+sin(x*14.)*1.8)+.18*sin(x*78.+time*.05);
-   float alpha=envelope*max(0.,drift)*.052;
+   float drift=.55+.25*sin(x*36.-time*.11+sin(x*14.)*1.8)+.20*sin(x*78.+time*.07);
+   float pockets=smoothstep(.28,.83,drift+.11*sin(x*141.+y*2.));
+   float alpha=envelope*pockets*.084;
    gl_FragColor=vec4(.105,.157,.205,alpha);
    #include <colorspace_fragment>
   }
