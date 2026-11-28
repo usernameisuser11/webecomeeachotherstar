@@ -29,7 +29,12 @@ function ground(x,z){
 function distantBank(x,z){
  const d=farBank(x)-z,t=clamp((d+2.2)/8.0,0,1),r=t*t*(3-2*t);
  const terrain=.30+1.10*fbm(x*.10,z*.13,319)+.18*Math.sin(x*.18+z*.23);
- return -2.2+r*(1.65+terrain)+Math.sin(Math.PI*t)*.19*(fbm(x*.28,z*.29,193)-.5);
+ // Low foothills rise behind the opposite shoreline, leaving the water's
+ // shallow edge unchanged. Broad irregular crests avoid a continuous wall.
+ const inland=clamp((d-5)/13,0,1),fade=inland*inland*(3-2*inland);
+ const shoulder=Math.exp(-Math.pow((d-17)/16,2));
+ const mounds=.30+1.45*fbm(x*.055,z*.077,611)+.45*noise(x*.105,z*.095,774);
+ return -2.2+r*(1.65+terrain)+Math.sin(Math.PI*t)*.19*(fbm(x*.28,z*.29,193)-.5)+fade*shoulder*mounds;
 }
 const fogColor=new T.Color("#354c71");
 // Shared, restrained meadow lighting. Green albedo is not overwritten by the
@@ -584,8 +589,8 @@ function branchMesh(data){
 }
 function curveOf(a,b,c){return new T.CatmullRomCurve3([a,b,c]);}
 // Deciduous woodland, with the original memory tree kept separately.
-function makeWoodland(scene,rand,small){
- const r=random(839127),data={p:[],c:[],i:[]},clusters=[],o=new T.Object3D();
+function makeWoodland(scene,rand,small,distant=false){
+ const r=random(distant?731459:839127),data={p:[],c:[],i:[]},clusters=[],o=new T.Object3D();
  const bark=new T.Color("#594b40"),dark=new T.Color("#34583b"),light=new T.Color("#72955d");
  // A few deciduous trees frame the clearing, with the memory tree remaining
  // the distinctive foreground specimen. No evenly spaced avenue or conical crowns.
@@ -605,7 +610,8 @@ function makeWoodland(scene,rand,small){
  ];
  const memoryX=small?-3.8:-7.8;
  function makeTree(x,z,height,seed){
-  const y=ground(x,z);if(y<-.65||Math.hypot(x-memoryX,z+10.8)<4.3)return;
+  const y=distant?distantBank(x,z):ground(x,z);
+  if(y<-.65||(!distant&&Math.hypot(x-memoryX,z+10.8)<4.3))return;
   const spread=height*(.32+r()*.08),lean=(r()-.5)*height*.16,leanZ=(r()-.5)*height*.10;
   const base=new T.Vector3(x,y-.03,z),mid=new T.Vector3(x+lean*.24,y+height*.32,z+leanZ*.25);
   const tip=new T.Vector3(x+lean,y+height*.70,z+leanZ);
@@ -647,7 +653,26 @@ function makeWoodland(scene,rand,small){
   }
   grow(tip,new T.Vector3(lean*.20,1,leanZ*.20).normalize(),height*.22,radius*.23,2);
  }
- sites.forEach(([x,z,h],i)=>makeTree(x,z,h,i+1));
+ if(distant){
+  // Irregular little groves with openings through to the mountains.
+  const groves=[[-41,5],[-24,4],[12,3],[28,4],[47,4]];
+  const placed=[];
+  let seed=0;
+  for(const [center,count] of groves){
+   for(let j=0;j<(small?Math.max(2,count-1):count);j++){
+    for(let attempt=0;attempt<12;attempt++){
+     const x=center+(r()-.5)*13,z=farBank(x)-5.0-r()*5.8;
+     if(placed.some(q=>Math.hypot(q[0]-x,q[1]-z)<2.4))continue;
+     if(distantBank(x,z)<-.38)continue;
+     const mountain=mountainHeight(87,-61,17,15)(x,z);
+     if(mountain>distantBank(x,z)+.4)continue;
+     const h=1.45+Math.pow(r(),1.2)*1.30;
+     placed.push([x,z]);makeTree(x,z,h,++seed);break;
+    }
+   }
+  }
+ }else sites.forEach(([x,z,h],i)=>makeTree(x,z,h,i+1));
+ if(!clusters.length)return;
  scene.add(branchMesh(data));
  // Small folded, oval leaves, geometrically rendered with standard instance
  // colors. Use many overlapping leaves instead of balls, disks or image cards.
@@ -663,7 +688,7 @@ function makeWoodland(scene,rand,small){
  g.setAttribute("color",new T.Float32BufferAttribute(cols,3));
  g.setIndex(idx);g.computeVertexNormals();
  const m=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:true});
- const countPer=small?25:43;
+ const countPer=distant?(small?13:20):(small?25:43);
  const mesh=new T.InstancedMesh(g,m,clusters.length*countPer);
  let i=0;
  for(const c of clusters){
@@ -746,6 +771,33 @@ function contactShadow(radiusX,radiusZ,strength){
   return {mesh,place(x,z,scale=1){mesh.position.set(x,0,z);mesh.scale.set(scale,1,scale);for(let i=0;i<p.count;i++){const px=base[i*3],pz=base[i*3+2];p.setY(i,ground(x+px*scale,z+pz*scale)+.025);}p.needsUpdate=true;g.computeBoundingSphere();},dispose(){g.dispose();m.dispose();}};
 }
 
+// A subtle ribbon of animated water vapour. The translucent surface follows
+// the far shore, with zero opacity at both ends and at its top and base.
+function makeValleyMist(){
+ const p=[],uv=[],idx=[],n=120;
+ for(let i=0;i<=n;i++){
+  const u=i/n,x=(u-.5)*142,z=farBank(x)+1.6;
+  p.push(x,WATER_LEVEL+.10,z,x,WATER_LEVEL+1.45+.32*noise(x*.08,0,37),z-.75);
+  uv.push(u,0,u,1);
+  if(i<n){const a=i*2;idx.push(a,a+2,a+1,a+1,a+2,a+3);}
+ }
+ const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setAttribute("uv",new T.Float32BufferAttribute(uv,2));g.setIndex(idx);
+ const material=new T.ShaderMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,toneMapped:false,uniforms:{time:{value:0}},vertexShader:`
+  varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
+ `,fragmentShader:`
+  varying vec2 vUv;uniform float time;
+  void main(){
+   float x=vUv.x,y=vUv.y;
+   float envelope=sin(y*3.14159265)*smoothstep(0.,.12,x)*(1.-smoothstep(.88,1.,x));
+   float drift=.50+.25*sin(x*36.-time*.10+sin(x*14.)*1.8)+.18*sin(x*78.+time*.05);
+   float alpha=envelope*max(0.,drift)*.052;
+   gl_FragColor=vec4(.12,.20,.25,alpha);
+   #include <colorspace_fragment>
+  }
+ `});
+ const mesh=new T.Mesh(g,material);mesh.renderOrder=1;return mesh;
+}
+
 export function createLiveOverlook(){
  const small=window.innerWidth<760,rand=random(2261127);
  const renderer=new T.WebGLRenderer({antialias:!small,powerPreference:"high-performance",alpha:false,preserveDrawingBuffer:true});
@@ -764,8 +816,9 @@ export function createLiveOverlook(){
  const lake=makeLake(small);scene.add(lake.mesh);
  scene.add(meshTerrain(140,100,small?180:220,21,ground,"#264b23","#608b40"));
  const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeRiverEdges(scene,small);
- const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);
+ const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);makeWoodland(scene,rand,small,true);
  for(const object of scene.children)if(!beforeForest.has(object))object.layers.enable(1);
+ const mist=makeValleyMist();scene.add(mist);
  const tree=makeMemoryTree(scene,rand,small);const people=new Map();
  let w=0,h=0,last=-Infinity,dead=false;
  const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -776,7 +829,7 @@ export function createLiveOverlook(){
    if(nw!==w||nh!==h){w=nw;h=nh;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();last=-Infinity;}
    if(ms-last>=1000/(small?24:30)){
      const dt=Number.isFinite(last)?Math.min(.12,(ms-last)*.001):.033;const t=reduced?0:ms*.001;sky.material.uniforms.time.value=t;stars.material.uniforms.time.value=t;stars.material.uniforms.scale.value=scale;
-     lake.material.uniforms.time.value=t;wind.value=t;
+     lake.material.uniforms.time.value=t;wind.value=t;mist.material.uniforms.time.value=t;
      tree.mat.emissiveIntensity=.22+Math.min(1.0,count*.013)+.08*Math.sin(t*.8);
      const ids=new Set(peers.map(p=>p.id));
      for(const [id,v] of people)if(!ids.has(id)){scene.remove(v.root,v.shadow.mesh);people.delete(id);v.shadow.dispose();v.dispose();}
