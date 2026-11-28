@@ -44,7 +44,7 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
     const c=c0.clone().lerp(c1,shade);
     if(meadow){
       const worn=Math.exp(-Math.pow((z+3)/3.6,2))*Math.exp(-Math.pow(x/10,4));
-      c.lerp(new T.Color("#5a704c"),worn*.12);
+      c.lerp(new T.Color("#586348"),worn*.12);
       const wet=1-clamp((y-WATER_LEVEL)/.85,0,1);
       if(wet>0)c.lerp(new T.Color("#424b3d"),wet*.78);
     }
@@ -313,19 +313,29 @@ function tuftGeometry(seed,leaves,segments){
 }
 // Low individual grass leaves. No radial clumps or repeated star-shaped tufts
 // in the open lawn. Surface color supplies distant turf at subpixel distances.
-function lawnBlade(seed){
+// A continuous sward: near blades are closely spaced and far blades are
+// progressively lower detail. No radial clusters or high contrast green spikes.
+function lawnBlade(seed,segments){
  const r=random(seed),p=[],idx=[],tips=[];
- const bend=.26+r()*.26,w=.12+r()*.06;
- for(let j=0;j<=4;j++){
-  const t=j/4,x=bend*t*t,y=t-.15*t*t*t,half=w*Math.pow(1-t,.78);
-  p.push(x-half,y,0,x+half,y,.02*Math.sin(t*Math.PI));tips.push(t,t);
-  if(j<4){const k=j*2;idx.push(k,k+1,k+2,k+1,k+3,k+2);}
+ const bend=.38+r()*.27,w=.11+r()*.055;
+ for(let j=0;j<=segments;j++){
+  const t=j/segments,x=bend*t*t,y=t-.12*t*t*t,half=w*Math.pow(1-t,.80);
+  p.push(x-half,y,0,x+half,y,.014*Math.sin(t*Math.PI));tips.push(t,t);
+  if(j<segments){const k=j*2;idx.push(k,k+1,k+2,k+1,k+3,k+2);}
  }
  const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));
  g.setAttribute("bladeFlex",new T.Float32BufferAttribute(tips,1));g.setIndex(idx);
- // Blended upward lighting avoids sharp dark spikes on tiny leaf surfaces.
- const n=[];for(let j=0;j<p.length/3;j++)n.push(0,.94,.34);
- g.setAttribute("normal",new T.Float32BufferAttribute(n,3));return g;
+ g.computeVertexNormals();return g;
+}
+// Sample the same triangular heightfield as the visible ground mesh. This
+// prevents floating blades or tips disappearing below interpolated terrain.
+function turfHeight(x,z,small){
+ const nx=small?144:184,nz=Math.round(nx*.64),dx=100/nx,dz=62/nz;
+ const gx=clamp((x+50)/dx,0,nx-1e-5),gz=clamp((z+29)/dz,0,nz-1e-5);
+ const i=Math.floor(gx),j=Math.floor(gz),u=gx-i,v=gz-j;
+ const X=-50+i*dx,Z=-29+j*dz;
+ const h00=ground(X,Z),h10=ground(X+dx,Z),h01=ground(X,Z+dz),h11=ground(X+dx,Z+dz);
+ return u+v<=1?h00+(h10-h00)*u+(h01-h00)*v:h11+(h01-h11)*(1-u)+(h10-h11)*(1-v);
 }
 function makeMeadow(scene,rand,small){
  const wind={value:0},r=random(923781),o=new T.Object3D();
@@ -338,43 +348,47 @@ function makeMeadow(scene,rand,small){
     #ifdef USE_INSTANCING
      vec2 q=instanceMatrix[3].xz;
      float wave=sin(wind*.65-q.x*.29-q.y*.21);
-     transformed.x+=bladeFlex*bladeFlex*(.09*wave+.018*sin(wind*1.4+q.x*.7));
+     transformed.x+=bladeFlex*bladeFlex*(.07*wave+.014*sin(wind*1.4+q.x*.7));
     #endif`);
-  shader.fragmentShader=shader.fragmentShader.replace("#include <common>","#include <common>\nvarying float vLawnTip;").replace("#include <color_fragment>",`#include <color_fragment>
-   diffuseColor.rgb*=mix(.84,1.025,vLawnTip);
-  `);
+  shader.fragmentShader=shader.fragmentShader.replace("#include <common>","#include <common>\nvarying float vLawnTip;")
+    .replace("#include <color_fragment>",`#include <color_fragment>
+     diffuseColor.rgb*=mix(.79,1.025,vLawnTip);
+    `)
+    .replace("#include <normal_fragment_begin>",`#include <normal_fragment_begin>
+     // Treat grass like a soft upward-facing canopy rather than tiny hard planes.
+     normal=normalize(mix(normalize(mat3(viewMatrix)*vec3(0.,1.,0.)),normal,.16));
+    `);
  };
- mat.customProgramCacheKey=()=>"quiet-lawn-v1";
- const base=new T.Color("#526947"),light=new T.Color("#698054"),shade=new T.Color("#445e43"),c=new T.Color();
- // Stratified, jittered points prevent both empty holes and radial patterns.
+ mat.customProgramCacheKey=()=>"continuous-short-grass-v2";
+ const deep=new T.Color("#344b3c"),green=new T.Color("#637a50"),c=new T.Color();
  const zones=[
-  {x0:-12,x1:12,z0:-7,z1:9,step:small?.235:.175},
-  {x0:-23,x1:23,z0:-17,z1:13,step:small?.59:.44}
+  {x0:-13,x1:13,z0:-8,z1:11,step:small?.135:.095,detail:3},
+  {x0:-24,x1:24,z0:-18,z1:13,step:small?.31:.24,detail:2}
  ];
  for(let k=0;k<zones.length;k++){
   const zone=zones[k],nx=Math.ceil((zone.x1-zone.x0)/zone.step),nz=Math.ceil((zone.z1-zone.z0)/zone.step);
   const list=[];
   for(let j=0;j<nz;j++)for(let i=0;i<nx;i++){
    const x=zone.x0+(i+r())*(zone.x1-zone.x0)/nx,z=zone.z0+(j+r())*(zone.z1-zone.z0)/nz;
-   if(k===1&&x>-12&&x<12&&z>-7&&z<9)continue;
-   const y=ground(x,z);if(y<-.87)continue;
-   const seating=Math.exp(-Math.pow((z+3)/2.8,2))*Math.exp(-Math.pow(x/12,4));
-   const edge=clamp((Math.abs(x)-10)/12,0,1),patch=fbm(x*.12,z*.14,87);
-   const chance=.81+.16*patch-.08*seating;
-   if(r()>chance)continue;
-   const h=(.028+Math.pow(r(),2)*(.061+.035*edge))*(1-.29*seating);
+   if(k===1&&x>-13&&x<13&&z>-8&&z<11)continue;
+   const y=turfHeight(x,z,small);if(y<-.87)continue;
+   const seat=Math.exp(-Math.pow((z+3)/2.8,2))*Math.exp(-Math.pow(x/12,4));
+   const far=1-smoothstepLocal(-17,-8,z),patch=fbm(x*.12,z*.14,87);
+   if(r()>.96-.19*far)continue;
+   const h=(.041+Math.pow(r(),1.7)*.058)*(1-.24*seat)*(1-.23*far);
    list.push([x,y,z,h,patch]);
   }
-  const mesh=new T.InstancedMesh(lawnBlade(717+k*97),mat,list.length);
+  const mesh=new T.InstancedMesh(lawnBlade(717+k*97,zone.detail),mat,list.length);
   for(let i=0;i<list.length;i++){
    const [x,y,z,h,patch]=list[i];
-   o.position.set(x,y-.007,z);o.rotation.set(0,r()*TAU,(r()-.5)*.20);
-   o.scale.set(h*(.78+r()*.42),h,h);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
-   c.copy(base).lerp(light,.20+.48*patch+.09*r()).lerp(shade,r()*.18);mesh.setColorAt(i,c);
+   o.position.set(x,y-.006,z);o.rotation.set(0,r()*TAU,(r()-.5)*.14);
+   o.scale.set(h*(.95+r()*.35),h,h);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
+   const coarse=fbm(x*.075,z*.095,17),fine=fbm(x*.42,z*.55,79);
+   const blend=clamp(.33+coarse*.33+fine*.07,0,1);
+   c.copy(deep).lerp(green,clamp(blend+.035+(r()-.5)*.13,0,1));mesh.setColorAt(i,c);
   }
-  scene.add(mesh);
+  mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;scene.add(mesh);
  }
- // Wildflowers and fern-like shapes stay outside the open lawn.
  return wind;
 }
 // Low weathered rocks, embedded in the earth, with procedural mineral and moss colors.
@@ -618,7 +632,7 @@ export function createLiveOverlook(){
  for(const object of scene.children)if(object.isMesh||object.isLight)object.layers.enable(1);
  scene.add(makeFarBank());
  const lake=makeLake(small);scene.add(lake.mesh);
- scene.add(meshTerrain(100,62,small?144:184,2,ground,"#435c42","#657c50"));
+ scene.add(meshTerrain(100,62,small?144:184,2,ground,"#344b3c","#637a50"));
  const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeRiverEdges(scene,small);
  const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);
  for(const object of scene.children)if(!beforeForest.has(object))object.layers.enable(1);
