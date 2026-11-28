@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { drawMemoryTree } from "./MemoryTree";
-import type { LiveOverlook, LivePeer } from "./LiveOverlook";
+import type { LiveMeteor, LiveOverlook, LivePeer } from "./LiveOverlook";
 
 export type Star = { id: string; name: string; x: number; y: number; hue: number; createdAt: number };
 export type Glow = { toStarId: string; createdAt: number };
@@ -30,7 +30,7 @@ type Props = {
   onSelectStar: (id: string) => void;
 };
 
-type MeteorTint = "ice" | "mint" | "amber";
+type MeteorTint = LiveMeteor["tint"];
 type Meteor = {
   x: number; y: number; vx: number; vy: number; length: number; wake: number;
   born: number; flight: number; trainLife: number; bright: number;
@@ -489,13 +489,10 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     const timeZero = performance.now();
     const meteors: Meteor[] = [];
     const random = rng(31027);
-    // Warm all optical textures once, outside the animation loop.
-    for (const tint of ["ice", "mint", "amber"] as const) {
-      meteorSprite(tint);
-      meteorSprite(tint, true);
-      meteorHeadSprite(tint);
-    }
+    const meteorLights: LiveMeteor[] = [];
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     let nextMeteor = 8;
+    let hasRenderedLive = false;
     let seenShower = refs.current.showerKey;
     let showerUntil = -1;
     let showerStartedAt = -1;
@@ -614,6 +611,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     function prepareFallback() {
       if (!canvas || !ctx || backdrop || !w || !h) return;
       backdrop = createBackdrop(w, h, theme);
+      ambientLayers = createAmbientLayers(w, h, dpr);
       terrainLayer = document.createElement("canvas");
       terrainLayer.width = canvas.width;
       terrainLayer.height = canvas.height;
@@ -644,8 +642,9 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       meteorLayerClear = true;
       local.current = { w, h };
       backdrop = null; terrainLayer = null; treeLayer = null; treeCtx = null;
-      if (!loading && !liveWorld) prepareFallback();
-      ambientLayers = createAmbientLayers(w, h, dpr);
+      meteors.length = 0;
+      meteorLights.length = 0;
+      ambientLayers = [];
       drawnSky = null;
       layerPeople = null;
       labelCacheKey = "";
@@ -656,40 +655,38 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     resize();
 
     function spawnMeteor(t: number, bright = 1) {
-      if (w < 1 || h < 1) return;
-      // Design the complete trajectory inside the upper sky before spawning.
-      // A conservative lower bound keeps head, halo and wake above the terrain.
+      if (w < 1 || h < 1 || meteors.length >= 4) return;
       const fireball = bright > 1.16;
       const portrait = w < 750;
-      const skyBottom = h * (portrait ? .31 : .285);
-      const skyTop = h * .075;
-      const pad = Math.min(24, w * .055);
-      const x = w * (.69 + random() * .24);
-      const y = skyTop + random() * Math.max(1, skyBottom - skyTop - h * .12);
-      const angle = .16 + random() * .22;
-      const flight = fireball ? 1.40 + random() * .30 : .95 + random() * .34;
-      const distance = Math.min(w * (fireball ? .54 : .37) * (.76 + random() * .24),
-        (x-pad)/Math.cos(angle),
-        Math.max(4,skyBottom-y-pad)/Math.sin(angle));
-      const speed = distance / flight;
+      const sign = random() < .74 ? -1 : 1;
+      const x = w * (sign < 0 ? .39 + random() * .53 : .08 + random() * .53);
+      const y = h * (.105 + random() * (portrait ? .235 : .245));
+      const angle = .12 + random() * (portrait ? .73 : .49);
+      const dx = sign * Math.cos(angle), dy = Math.sin(angle);
+      const pad = Math.min(23, w * .053);
+      // The WebGL trail is also occluded by the mountains and trees. Limit
+      // the overall flight to an area with enough sky for most of the pass.
+      const lowerLimit = h * (liveReady ? (portrait ? .55 : .50) : .47);
+      const travel = Math.min(
+        w * (fireball ? .61 : .44) * (.64 + random() * .36),
+        (sign < 0 ? x - pad : w - x - pad) / Math.abs(dx),
+        (lowerLimit - y - pad) / dy,
+      );
+      const flight = fireball ? 1.35 + random() * .49 : .63 + random() * .63;
       const tintRoll = random();
-      const tint: MeteorTint = fireball
-        ? tintRoll < .40 ? "mint" : tintRoll < .89 ? "ice" : "amber"
-        : tintRoll < .88 ? "ice" : tintRoll < .97 ? "mint" : "amber";
+      const tint: MeteorTint = tintRoll < (fireball ? .68 : .88) ? "ice" : tintRoll < .95 ? "mint" : "amber";
       meteors.push({
-        x, y, vx: -speed * Math.cos(angle), vy: speed * Math.sin(angle),
-        born: t,
-        length: Math.min(distance*.80, w * (fireball ? .28 : .18), fireball ? 210 : 132),
-        wake: Math.min(distance*.93,w*(fireball?.40:.25),fireball?290:160),
-        flight,
-        trainLife: fireball ? 1.2 + random() * .55 : .30 + random() * .28,
-        bright, fireball, flareAt: .43 + random() * .28, tint,
+        x, y, vx: dx * travel / flight, vy: dy * travel / flight,
+        born: t, length: Math.min(travel * .82, fireball ? 225 : 126),
+        wake: Math.min(travel * .96, fireball ? 286 : 149),
+        flight, trainLife: fireball ? 1.2 + random() * .68 : .24 + random() * .36,
+        bright, fireball, flareAt: .44 + random() * .30, tint,
       });
     }
 
     function render(now: number) {
       if (destroyed || !ctx) return;
-      if (w < 700 && now - lastPaint < 1000 / 30) {
+      if ((liveReady || w < 750) && now - lastPaint < 1000 / 30 - .8) {
         frame = requestAnimationFrame(render);
         return;
       }
@@ -701,8 +698,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       if (!w || !h) { frame = requestAnimationFrame(render); return; }
       if (liveWorld) {
         try {
-          rendered3d = liveWorld.render(ctx, w, h, now, livePeers.current, refs.current.stars.length);
-          if (!rendered3d) fallback("WebGL context unavailable");
+          rendered3d = liveWorld.render(ctx, w, h, now, livePeers.current, refs.current.stars.length, meteorLights);
         } catch (err) { fallback(err); }
       }
       if (loading && !rendered3d) {
@@ -711,14 +707,21 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
         frame = requestAnimationFrame(render);
         return;
       }
-      if (rendered3d && loading) {
+      if (rendered3d && !hasRenderedLive) {
+        hasRenderedLive = true;
         loading = false;
         if (loadTimer !== undefined) window.clearTimeout(loadTimer);
       }
       if (!rendered3d) prepareFallback();
-      if (rendered3d !== liveReady) { liveReady = rendered3d; onLiveReady(liveReady); }
-      canvas.dataset.renderer = rendered3d ? "live-webgl" : "fallback";
-      canvas.dataset.liveVisitors = rendered3d ? String(livePeers.current.length) : "0";
+      if (rendered3d !== liveReady) {
+        liveReady = rendered3d;
+        onLiveReady(liveReady);
+        setSceneStatus(liveReady ? "ready" : "fallback");
+      }
+      const renderingMode = rendered3d ? "live-webgl" : "fallback";
+      const presenceCount = rendered3d ? String(livePeers.current.length) : "0";
+      if (canvas.dataset.renderer !== renderingMode) canvas.dataset.renderer = renderingMode;
+      if (canvas.dataset.liveVisitors !== presenceCount) canvas.dataset.liveVisitors = presenceCount;
       if (!rendered3d && backdrop) ctx.drawImage(backdrop, 0, 0, w, h);
 
       // Batched static point plates replace thousands of per-frame draws.
@@ -836,14 +839,12 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       // Reveal only after the first complete frame (including shared stars).
       if (!published) {
         published = true;
-        setSceneStatus(failed ? "fallback" : "ready");
+        setSceneStatus(theme === "forest" && !rendered3d ? "fallback" : "ready");
       }
       frame = requestAnimationFrame(render);
     }
 
-    // This very cheap loop paints just 0–3 small cached textures per meteor.
-    // Positions are a function of elapsed time, never of the frame count:
-    // missed frames cannot jerk a meteor forward in a visible step.
+    // A single clock drives both the WebGL particles and the Canvas fallback.
     function renderMeteors(now: number) {
       if (destroyed) return;
       const t = (now - timeZero) / 1000;
@@ -866,44 +867,52 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
           if (t - scheduledAt < (fireball ? 3.4 : 1.8)) spawnMeteor(scheduledAt, fireball ? 1.32 : .79 + random() * .20);
         }
       } else if (t >= nextMeteor) {
-        if (meteors.length < 4) spawnMeteor(t, .69);
-        nextMeteor = t + 22 + random() * 15;
+        if (!reducedMotion.matches) {
+          const rare = random() < .055;
+          spawnMeteor(t, rare ? 1.38 : .65 + random() * .35);
+        }
+        nextMeteor = t + 19 + random() * 19;
       }
-      if (meteors.length || !meteorLayerClear) {
+      meteorLights.length = 0;
+      if ((!liveReady && meteors.length) || !meteorLayerClear) {
         meteorCtx.clearRect(0, 0, w, h);
-        meteorLayerClear = meteors.length === 0;
+        meteorLayerClear = liveReady || meteors.length === 0;
       }
       for (let i = meteors.length - 1; i >= 0; i--) {
         const m = meteors[i];
         const age = t - m.born;
         if (age > m.flight + m.trainLife) { meteors.splice(i, 1); continue; }
         const travelledFor = Math.min(age, m.flight);
-        const px = m.x + travelledFor * m.vx, py = m.y + travelledFor * m.vy;
+        const speed = Math.hypot(m.vx, m.vy);
+        const x = m.x + travelledFor * m.vx, y = m.y + travelledFor * m.vy;
+        const wake = Math.min(m.wake, speed * travelledFor);
+        const u = age / m.flight;
+        const enter = clamp(u / .14, 0, 1), leave = clamp((1 - u) / .24, 0, 1);
+        const ramp = enter * enter * (3 - 2 * enter) * leave * leave * (3 - 2 * leave);
+        const flare = Math.exp(-Math.pow((u - m.flareAt) / (m.fireball ? .14 : .25), 2));
+        const light = clamp(m.bright * ramp * (.80 + (m.fireball ? .52 : .25) * flare), 0, 1);
+        const length = Math.min(m.length, speed * travelledFor) * clamp(age / .17, 0, 1);
+        const persistence = (m.fireball ? .56 : .24) * (u < 1
+          ? clamp(age / .36, 0, 1)
+          : Math.pow(clamp(1 - (age - m.flight) / m.trainLife, 0, 1), 1.62)) * Math.min(1, m.bright);
+        if (liveReady) {
+          meteorLights.push({ x, y, dx: m.vx / speed, dy: m.vy / speed, length, wake, light, persistence, fireball: m.fireball, tint: m.tint });
+          continue;
+        }
         meteorCtx.save();
         meteorCtx.globalCompositeOperation = "screen";
-        meteorCtx.translate(px, py);
+        meteorCtx.translate(x, y);
         meteorCtx.rotate(Math.atan2(m.vy, m.vx));
-        const wakeLength = Math.min(m.wake, Math.hypot(m.vx, m.vy) * travelledFor);
-        if (wakeLength > 5) {
-          const afterFlight = Math.max(0, age - m.flight);
-          const persistence = age < m.flight ? clamp(age / .40, 0, 1) : Math.pow(clamp(1 - afterFlight / m.trainLife, 0, 1), 1.65);
-          meteorCtx.globalAlpha = (m.fireball ? .48 : .20) * persistence * Math.min(1, m.bright);
-          const trainHeight = m.fireball ? 21 : 11;
-          meteorCtx.drawImage(meteorSprite(m.tint, true), -wakeLength, -trainHeight / 2, wakeLength, trainHeight);
+        if (wake > 5) {
+          meteorCtx.globalAlpha = persistence;
+          const height = m.fireball ? 21 : 11;
+          meteorCtx.drawImage(meteorSprite(m.tint, true), -wake, -height / 2, wake, height);
         }
-        if (age < m.flight) {
-          const u = age / m.flight;
-          const enter=clamp(u/.15,0,1),leave=clamp((1-u)/.24,0,1);
-          const inRamp=enter*enter*(3-2*enter),outRamp=leave*leave*(3-2*leave);
-          const flare = Math.exp(-Math.pow((u - m.flareAt) / (m.fireball ? .16 : .25), 2));
-          meteorCtx.globalAlpha = clamp(m.bright * inRamp * outRamp * (.68 + (m.fireball ? .40 : .25) * flare), 0, 1);
-          const length = Math.min(m.length, Math.hypot(m.vx,m.vy)*travelledFor) * clamp(age / .19, 0, 1);
+        if (light > .004) {
           const height = m.fireball ? 17 : 11;
+          meteorCtx.globalAlpha = light;
           meteorCtx.drawImage(meteorSprite(m.tint), -length, -height / 2, length, height);
-          // Keep the star-white point visible at its actual screen size,
-          // independent of the tapered streak's stretched sprite texture.
           const headSize = m.fireball ? 29 : 17;
-          meteorCtx.globalAlpha = clamp(m.bright * inRamp * outRamp * (.76 + (m.fireball ? .45 : .18) * flare), 0, 1);
           meteorCtx.drawImage(meteorHeadSprite(m.tint), -headSize / 2, -headSize / 2, headSize, headSize);
         }
         meteorCtx.restore();
@@ -918,7 +927,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
   return <><canvas
     ref={canvasRef}
     className={`sky-canvas ${placing ? 'placing' : ''}`}
-    aria-label="별빛과 은하수, 산과 호수가 펼쳐진 밤하늘. 자신의 별과 다른 친구의 별을 선택할 수 있습니다."
+    aria-label="별빛과 은하수, 산과 강이 펼쳐진 밤하늘. 자신의 별과 다른 친구의 별을 선택할 수 있습니다."
     onPointerUp={(e) => {
       const rect = e.currentTarget.getBoundingClientRect();
       const x = (e.clientX - rect.left) / rect.width;
