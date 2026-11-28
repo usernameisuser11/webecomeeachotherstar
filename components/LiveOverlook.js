@@ -592,12 +592,16 @@ function makeWoodland(scene,rand,small){
  const sites=small?[
   [-10.7,-12.8,3.5],[5.2,-11.8,3.4],[10.5,-9.9,4.5],
   [-17.6,-15.0,4.4],[-23.0,-11.2,5.0],[18.7,-15.0,4.0],
-  [8.5,-13.0,2.2]
+  [8.5,-13.0,2.2],
+  // Modest foreground trees frame the vertical view without filling the sky.
+  [2.65,1.8,1.85],[-3.1,.0,1.65]
  ]:[
   [-15.4,-12.8,3.5],[10.7,-12.9,3.4],[19.8,-9.9,4.5],
   [-21.1,-13.1,4.4],[-26.3,-11.2,5.0],[27.3,-15.0,4.0],
   [6.1,-13.2,2.2],[-4.8,-16.5,2.0],[-18.2,-14.0,2.7],
-  [15.6,-16.2,2.8]
+  [15.6,-16.2,2.8],
+  // Asymmetric foreground and mid-ground framing, well clear of the seated row.
+  [-8.0,3.1,2.15],[7.4,2.6,2.45],[12.4,-4.5,2.8]
  ];
  const memoryX=small?-3.8:-7.8;
  function makeTree(x,z,height,seed){
@@ -643,7 +647,7 @@ function makeWoodland(scene,rand,small){
   }
   grow(tip,new T.Vector3(lean*.20,1,leanZ*.20).normalize(),height*.22,radius*.23,2);
  }
- sites.slice(0,small?7:sites.length).forEach(([x,z,h],i)=>makeTree(x,z,h,i+1));
+ sites.forEach(([x,z,h],i)=>makeTree(x,z,h,i+1));
  scene.add(branchMesh(data));
  // Small folded, oval leaves, geometrically rendered with standard instance
  // colors. Use many overlapping leaves instead of balls, disks or image cards.
