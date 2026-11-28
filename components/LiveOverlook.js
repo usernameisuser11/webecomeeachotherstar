@@ -237,46 +237,37 @@ function makeStars(rand){
 // render target; it is regenerated on the GPU, never loaded from an image.
 // A continuous low riparian bank hides the far edge of the water mesh.
 function smoothstepLocal(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
-function makeFarBank(){
- const g=new T.PlaneGeometry(198,65,180,64);g.rotateX(-Math.PI/2);
+// Shared earth/grass colors for both the far-bank surface and the blades
+// growing on it. Bake gentle directional shading and atmosphere into the
+// vertices instead of relying on a custom fragment shader.
+function farBankTint(x,z,y){
+ const d=farBank(x)-z,moisture=smoothstepLocal(.02,.98,y-WATER_LEVEL);
+ const shade=fbm(x*.13,z*.15,49),swath=noise(x*.085,z*.10,431);
+ const wet=new T.Color("#344630"),grass=new T.Color("#526f3d"),deep=new T.Color("#344f36");
+ const c=wet.lerp(grass,moisture*(.44+.47*shade));
+ c.lerp(deep,.12+.22*swath+.27*smoothstepLocal(12,48,d));
+ const dx=(distantBank(x+.3,z)-distantBank(x-.3,z))/.6;
+ const dz=(distantBank(x,z+.3)-distantBank(x,z-.3))/.6;
+ const normalLight=clamp((1+.31*dx+.42*dz)/Math.sqrt(1+dx*dx+dz*dz),.70,1.16);
+ c.multiplyScalar(normalLight*(.89+.17*noise(x*.36,z*.29,553)));
+ const haze=smoothstepLocal(36,115,Math.hypot(x,z-15));
+ c.lerp(new T.Color("#3a5051"),.13+.25*haze);
+ return c;
+}
+function makeFarBank(small){
+ const nx=small?180:240,nz=small?80:112;
+ const g=new T.PlaneGeometry(198,65,nx,nz);g.rotateX(-Math.PI/2);
  const p=g.attributes.position,colors=[];
- const wet=new T.Color("#3c4b31"),dry=new T.Color("#587447"),dark=new T.Color("#304a32"),siltColor=new T.Color("#4b4b35");
  for(let i=0;i<p.count;i++){
   const x=p.getX(i),v=(p.getZ(i)+32.5)/65;
-  const z=farBank(x)-60+v*65,y=distantBank(x,z),inland=farBank(x)-z;
+  const z=farBank(x)-60+v*65,y=distantBank(x,z);
   p.setXYZ(i,x,y,z);
-  const moisture=smoothstepLocal(.03,1.10,y-WATER_LEVEL);
-  const grain=fbm(x*.12,z*.15,49),patch=noise(x*.065,z*.08,431);
-  const tone=wet.clone().lerp(dry,moisture*(.32+.65*grain));
-  tone.lerp(dark,.12+.29*patch+.22*smoothstepLocal(12,49,inland));
-  tone.lerp(siltColor,(1-moisture)*.22);
-  colors.push(tone.r,tone.g,tone.b);
+  const c=farBankTint(x,z,y);colors.push(c.r,c.g,c.b);
  }
  g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.computeVertexNormals();
- // Use standard vertex colors, separate from blue mountain lights. This is
- // geometry and procedural surface shading, never a loaded texture.
+ // Standard Three.js path, no custom GLSL, no image or texture.
  const material=new T.MeshBasicMaterial({vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
- material.onBeforeCompile=shader=>{
-  shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nvarying vec3 bankPosition;").replace("#include <begin_vertex>","#include <begin_vertex>\nbankPosition=position;");
-  shader.fragmentShader=shader.fragmentShader.replace("#include <common>",`#include <common>
-   varying vec3 bankPosition;
-   float bankNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-    vec4 h=fract(sin(vec4(dot(i,vec2(127.1,311.7)),dot(i+vec2(1.,0.),vec2(127.1,311.7)),dot(i+vec2(0.,1.),vec2(127.1,311.7)),dot(i+1.,vec2(127.1,311.7))))*43758.5453);
-    return mix(mix(h.x,h.y,f.x),mix(h.z,h.w,f.x),f.y);}
-  `).replace("#include <color_fragment>",`#include <color_fragment>
-   vec2 p=bankPosition.xz;
-   float broad=bankNoise(p*.29);
-   float middle=bankNoise(p*vec2(2.6,1.2));
-   float detail=bankNoise(p*vec2(12.,5.));
-   float filter=1.-smoothstep(.06,.34,length(fwidth(p)));
-   diffuseColor.rgb*=.76+.28*broad+.15*middle+.15*(detail-.5)*filter;
-   float dist=length(cameraPosition-bankPosition);
-   float haze=1.-exp(-dist*dist*.000065);
-   diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.035,.057,.065),haze*.43);
-  `);
- };
- material.customProgramCacheKey=()=>"green-foothill-cover-v1";
- const m=new T.Mesh(g,material);m.layers.enable(1);return m;
+ const mesh=new T.Mesh(g,material);mesh.layers.enable(1);return mesh;
 }
 // The water is a curving ribbon, not a rectangular plane extending to the horizon.
 function riverGeometry(small){
@@ -502,24 +493,26 @@ function makeDistantGroundCover(scene,small){
  const mountain=mountainHeight(87,-61,17,15);
  const g=lawnPatch(811,2,7);
  const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
- const deep=new T.Color("#344e2c"),bright=new T.Color("#66844b");
- const spacing=small?.68:.48;
- for(let x0=-51;x0<52;x0+=spacing){
-  for(let d0=3.1;d0<13.4;d0+=spacing){
+ const spacing=small?.74:.53;
+ for(let x0=-58;x0<58;x0+=spacing){
+  for(let d0=3.4;d0<17.0;d0+=spacing){
    const x=x0+r()*spacing,d=d0+r()*spacing,z=farBank(x)-d;
    const y=distantBank(x,z);
-   if(y<WATER_LEVEL+.20||mountain(x,z)>y+.18)continue;
+   // Never put grass over a mountain surface or in the water.
+   if(y<WATER_LEVEL+.30||mountain(x,z)>y-.12)continue;
    const patch=noise(x*.20,z*.24,591);
-   if(r()>.32+.64*patch)continue;
-   items.push([x,y,z,.13+.17*r()+.13*patch,patch]);
+   const fade=smoothstepLocal(3.4,6.1,d)*(1-smoothstepLocal(12,17,d));
+   if(r()>fade*(.50+.45*patch))continue;
+   items.push([x,y,z,(.10+.11*r())*(.65+.35*fade),patch]);
   }
  }
  if(!items.length){g.dispose();mat.dispose();return;}
  const mesh=new T.InstancedMesh(g,mat,items.length);
  items.forEach(([x,y,z,h,p],i)=>{
   o.position.set(x,y-.045,z);o.rotation.set(0,r()*TAU,0);
-  const w=spacing*(.62+r()*.2);o.scale.set(w,h,w);o.updateMatrix();
-  mesh.setMatrixAt(i,o.matrix);mesh.setColorAt(i,deep.clone().lerp(bright,.30+.35*p+.15*r()).multiplyScalar(.88));
+  const w=spacing*(.65+r()*.14);o.scale.set(w,h,w);o.updateMatrix();
+  mesh.setMatrixAt(i,o.matrix);
+  mesh.setColorAt(i,farBankTint(x,z,y).multiplyScalar(.94+.12*p));
  });
  mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
  mesh.computeBoundingSphere();mesh.layers.enable(1);scene.add(mesh);
@@ -888,7 +881,7 @@ export function createLiveOverlook(){
  scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
  scene.add(meshTerrain(155,62,132,-60,mountainHeight(87,-61,17,15),"#1b313e","#456771"));
  for(const object of scene.children)if(object.isMesh||object.isLight)object.layers.enable(1);
- scene.add(makeFarBank());makeDistantGroundCover(scene,small);
+ scene.add(makeFarBank(small));makeDistantGroundCover(scene,small);
  const lake=makeLake(small);scene.add(lake.mesh);
  scene.add(meshTerrain(140,100,small?180:220,21,ground,"#264b23","#608b40"));
  const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeRiverEdges(scene,small);makeFieldTransition(scene,small);
