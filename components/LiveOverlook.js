@@ -1,5 +1,7 @@
 import * as T from "three";
 import { createHuman } from "./SculptedHuman.js";
+import { makeSky, makeStars, makeMeteorLights } from "./OverlookSky.js";
+import { makeRiver } from "./OverlookWater.js";
 
 // All geometry, materials, atmosphere and vegetation are generated at runtime.
 // No background images, billboard trees, character sprites or remote art.
@@ -9,41 +11,41 @@ function random(seed){return()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)
 function hash(x,z,s){let n=Math.imul(x,374761393)^Math.imul(z,668265263)^s;n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295;}
 function noise(x,z,s){let a=Math.floor(x),b=Math.floor(z),u=x-a,v=z-b;u=u*u*(3-2*u);v=v*v*(3-2*v);return (hash(a,b,s)*(1-u)+hash(a+1,b,s)*u)*(1-v)+(hash(a,b+1,s)*(1-u)+hash(a+1,b+1,s)*u)*v;}
 function fbm(x,z,s){let a=0,w=.52;for(let i=0;i<5;i++){a+=w*noise(x,z,s+i*37);x=x*1.91+3.2;z=z*2.03-1.7;w*=.48;}return a;}
-// Continuous grassy promontory, with an irregular bank descending into the lake.
 const WATER_LEVEL=-1.52;
-// The two banks follow different curves. Their spacing varies gently across
-// the valley, with a wider bend to one side and a narrower distant channel.
+const MEADOW_WIDTH=188,MEADOW_DEPTH=112,MEADOW_CENTER=16;
+const fogColor=new T.Color("#344563");
+const smoothstepLocal=(a,b,x)=>T.MathUtils.smoothstep(x,a,b);
+
+// Both functions return the intersection of the land with the river surface.
 function nearBank(x){
- return -20.8+2.8*Math.cos(x*.094+.48)+1.15*Math.sin(x*.218)+(noise(x*.095,0,113)-.5)*2.4;
+ return -18.3+4.9*Math.sin(x*.102-.32)+1.47*Math.sin(x*.225+.31)+(noise(x*.21,0,113)-.5)*1.35;
 }
 function farBank(x){
- return -43.0+4.1*Math.sin(x*.071-.55)+1.7*Math.sin(x*.16+1.2)+(noise(x*.065,0,192)-.5)*2.2;
+ return -43.3+6.2*Math.sin(x*.069+1.02)-3.2*Math.cos(x*.133-.3)+(noise(x*.14,0,192)-.5)*1.55;
 }
 function ground(x,z){
- const t=clamp((z-nearBank(x))/8.5,0,1),shore=t*t*(3-2*t);
- const broad=-.72+1.42*Math.exp(-Math.pow((z-3)/24,2));
- const detail=.32*(fbm(x*.085,z*.085,39)-.5)+.065*Math.sin(x*.28+z*.17);
- const bankDetail=Math.sin(Math.PI*t)*(.16*(fbm(x*.30,z*.35,273)-.5)+.08*(noise(x*.75,z*.56,83)-.5));
- // Soft asymmetric undulations only in the transition toward the river.
- // The water level and seating area remain unchanged.
- const inland=1-Math.exp(-Math.pow((z-nearBank(x))/5.5,2));
- const band=Math.exp(-Math.pow((z+9.5)/5.8,2));
- const seating=Math.exp(-Math.pow((z+3)/3.4,2))*Math.exp(-Math.pow(x/12,4));
- const waves=.24*Math.sin(x*.21+z*.17)+.13*Math.sin(x*.44-z*.31)+.22*(fbm(x*.105,z*.12,913)-.5);
- const mound=.19*Math.exp(-Math.pow((x-9)/8.2,2))+ .14*Math.exp(-Math.pow((x+16)/7.3,2));
- return -2.35+shore*(2.35+broad+detail)+bankDetail+inland*band*(1-.9*seating)*(waves+mound);
+ const distance=z-nearBank(x);
+ if(distance<=0)return WATER_LEVEL-.93*smoothstepLocal(0,5.8,-distance);
+ const shore=smoothstepLocal(0,9.6,distance);
+ const broad=-.77+1.41*Math.exp(-Math.pow((z-3)/24,2));
+ const detail=.31*(fbm(x*.085,z*.085,39)-.5)+.064*Math.sin(x*.28+z*.17);
+ const clearing=Math.exp(-Math.pow((z+3)/3.5,2))*Math.exp(-Math.pow(x/12,4));
+ const rolling=.23*Math.sin(x*.19+z*.16)+.13*Math.sin(x*.43-z*.29)+.31*(fbm(x*.10,z*.12,913)-.48);
+ const bankDetail=.18*(fbm(x*.36,z*.41,273)-.46)*Math.sin(shore*Math.PI);
+ return T.MathUtils.lerp(WATER_LEVEL,broad+detail,shore)+bankDetail
+  +shore*(1-.92*clearing)*Math.exp(-Math.pow((z+9.7)/8.3,2))*rolling;
 }
 function distantBank(x,z){
- const d=farBank(x)-z,t=clamp((d+3.0)/11.2,0,1),r=t*t*(3-2*t);
- const terrain=.16+.74*fbm(x*.10,z*.13,319)+.24*Math.sin(x*.11+z*.19)+.12*Math.sin(x*.31-z*.12);
- // Low foothills rise behind the opposite shoreline, leaving the water's
- // shallow edge unchanged. Broad irregular crests avoid a continuous wall.
- const inland=clamp((d-5)/13,0,1),fade=inland*inland*(3-2*inland);
- const shoulder=Math.exp(-Math.pow((d-17)/16,2));
- const mounds=.15+1.65*fbm(x*.055,z*.077,611)+.53*noise(x*.105,z*.095,774);
- return -2.2+r*(1.65+terrain)+Math.sin(Math.PI*t)*.19*(fbm(x*.28,z*.29,193)-.5)+fade*shoulder*mounds;
+ const d=farBank(x)-z;
+ if(d<=0)return WATER_LEVEL-1.10*smoothstepLocal(0,6,-d);
+ const ledge=.70*smoothstepLocal(0,4.6,d)+.62*smoothstepLocal(3,13,d);
+ const swale=fbm(x*.073-z*.043,z*.104,319);
+ const terrace=1-Math.abs(2*fbm(x*.089,z*.119,611)-1);
+ const rolls=1.6*swale+.36*Math.sin(x*.23+z*.27)+.57*noise(x*.115,z*.105,774);
+ const foothills=smoothstepLocal(4,18,d)*(1-smoothstepLocal(41,73,d))*(.45+1.33*terrace+rolls);
+ const bankDetail=.21*(fbm(x*.29,z*.37,193)-.48)*smoothstepLocal(0,3,d);
+ return WATER_LEVEL+ledge+foothills+bankDetail;
 }
-const fogColor=new T.Color("#354c71");
 // Shared, restrained meadow lighting. Green albedo is not overwritten by the
 // strongly blue directional lights used for mountains and sky.
 // One procedural shading model for the soil canopy and real grass geometry.
@@ -113,6 +115,7 @@ function turfMaterial(blades,wind){
 }
 function meshTerrain(width,depth,segments,z0,height,low,high){
   const meadow=height===ground;
+  const wetMud=new T.Color("#424b3d"),clearingTurf=new T.Color("#486b32");
   const geo=new T.PlaneGeometry(width,depth,segments,Math.round(segments*.64));geo.rotateX(-Math.PI/2);
   const a=geo.attributes.position,col=[],c0=new T.Color(low),c1=new T.Color(high);
   for(let i=0;i<a.count;i++){
@@ -123,9 +126,9 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
     const c=c0.clone().lerp(c1,shade);
     if(meadow){
       const worn=Math.exp(-Math.pow((z+3)/3.6,2))*Math.exp(-Math.pow(x/10,4));
-      c.lerp(new T.Color("#486b32"),worn*.10);
+      c.lerp(clearingTurf,worn*.10);
       const wet=1-clamp((y-WATER_LEVEL)/.85,0,1);
-      if(wet>0)c.lerp(new T.Color("#424b3d"),wet*.78);
+      if(wet>0)c.lerp(wetMud,wet*.78);
     }
     col.push(c.r,c.g,c.b);
   }
@@ -145,9 +148,9 @@ function meshTerrain(width,depth,segments,z0,height,low,high){
      float detail=landNoise(landPos*3.1)*.65+landNoise(landPos*11.)*.35;
      diffuseColor.rgb*=.73+.34*broad+.19*detail;
    `);
-   if(meadow)shader.fragmentShader=shader.fragmentShader.replace("diffuseColor.rgb*=.73+.34*broad+.19*detail;","diffuseColor.rgb*=.94+.10*broad+.02*detail;").replace("#include <roughnessmap_fragment>",`#include <roughnessmap_fragment>\n     float lawn=landNoise(vec3(landPos.x*.23,2.,landPos.z*.27));\n     float fineTurf=landNoise(vec3(landPos.x*11.,1.,landPos.z*14.));\n     float filter=1.-smoothstep(.035,.19,length(fwidth(landPos.xz)));\n     diffuseColor.rgb*=mix(.94,1.06,lawn)*mix(1.,.94+.12*fineTurf,filter);\n   `);
+
   };
-  material.customProgramCacheKey=()=>meadow?"quiet-lawn-soil-v1":"natural-land-v2";
+  material.customProgramCacheKey=()=>"natural-land-v2";
   return new T.Mesh(geo,material);
 }
 // Each range has its own asymmetric ridge profile, with a broad central valley.
@@ -178,225 +181,41 @@ function mountainHeight(seed,center,amp,spread){
   return -9+flank*(crest+broad+rock+ravines);
  };
 }
-function makeSky(){
- const geo=new T.SphereGeometry(340,48,32);
- const mat=new T.ShaderMaterial({side:T.BackSide,depthWrite:false,toneMapped:false,uniforms:{time:{value:0}},vertexShader:`
- varying vec3 dir;void main(){dir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
- `,fragmentShader:`
- precision highp float;
- varying vec3 dir;uniform float time;
- // Stable high precision hash and quintic interpolation, with rotation
- // between octaves so the nebula has no axis-aligned block boundaries.
- float h(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
- float n(vec3 p){
-  vec3 i=floor(p),f=fract(p);f=f*f*f*(f*(f*6.-15.)+10.);
-  return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
-   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z);
- }
- float fb(vec3 p){
-  float v=0.,a=.54;
-  mat3 rot=mat3(.00,.80,.60,-.80,.36,-.48,-.60,-.48,.64);
-  for(int i=0;i<5;i++){v+=a*n(p);p=rot*p*2.04+vec3(13.7,7.1,5.2);a*=.49;}
-  return v;
- }
- void main(){
-  vec3 d=normalize(dir);float alt=max(0.,d.y);
-  vec3 col=mix(vec3(.061,.084,.157),vec3(.003,.008,.029),smoothstep(0.,.61,alt));
-  float horizon=exp(-abs(d.y+.02)*10.);
-  col+=vec3(.031,.036,.060)*horizon;
-  vec3 plane=normalize(vec3(.62,.32,.39));
-  vec3 warp=vec3(fb(d*7.+3.),fb(d*7.+17.),fb(d*7.+31.))-.5;
-  vec3 q=d+warp*.075;
-  float band=dot(q,plane);
-  float core=exp(-pow(band*10.5,2.));
-  float veil=exp(-pow(band*4.4,2.));
-  float cloud=fb(q*25.+vec3(0.,1.,5.));
-  float wisps=fb(q*54.+vec3(8.,3.,2.));
-  float dust=fb(q*37.+vec3(3.,9.,15.));
-  float lane=smoothstep(.39,.68,dust+.09*(wisps-.5));
-  float light=pow(clamp(cloud*.85+wisps*.25,0.,1.),1.7)*(1.-.76*lane);
-  vec3 cool=vec3(.062,.102,.194),violet=vec3(.145,.084,.212),rose=vec3(.20,.123,.19);
-  vec3 spectrum=mix(cool,violet,smoothstep(.27,.72,cloud));
-  spectrum=mix(spectrum,rose,smoothstep(.57,.85,wisps)*.45);
-  col+=veil*vec3(.022,.033,.077)*(.24+.76*cloud);
-  col+=core*spectrum*(.19+1.85*light);
-  col+=core*vec3(.115,.136,.194)*pow(light,2.)*.85;
-  // Fine dither below a display step, stable in screen space.
-  col+=(h(vec3(gl_FragCoord.xy,0.))-.5)*.00065;
-  gl_FragColor=vec4(max(col,vec3(0.)),1.);
-  #include <colorspace_fragment>
- }
- `});
- const mesh=new T.Mesh(geo,mat);mesh.renderOrder=-100;return mesh;
-}
-function makeStars(rand){
- const p=[],sizes=[],phases=[],colors=[],strengths=[];
- const palette=["#c9dfff","#e3ebff","#ffffff","#fff0d3","#decaff"].map(v=>new T.Color(v));
- const starRand=random(83921);
- for(let i=0;i<11500;i++){
-  let x,y,z;
-  if(i<6500){x=(starRand()-.5)*2.3;y=starRand()*.98+.02;z=-.23-starRand()*1.5;}
-  else{
-   // Galactic dust band: sample the same inclined plane as the nebula.
-   x=(starRand()-.5)*2.1;z=-.55-starRand()*.95;
-   y=clamp((-.62*x-.39*z)/.32+(starRand()-.5)*.48,.03,1.3);
-  }
-  const v=new T.Vector3(x,y,z).normalize().multiplyScalar(270);
-  p.push(v.x,v.y,v.z);
-  const power=Math.pow(starRand(),5.6);
-  sizes.push(.62+power*3.4);strengths.push(.25+.75*Math.pow(starRand(),.65));phases.push(starRand()*TAU);
-  const c=palette[Math.floor(starRand()*palette.length)];colors.push(c.r,c.g,c.b);
- }
- const geo=new T.BufferGeometry();
- geo.setAttribute("position",new T.Float32BufferAttribute(p,3));geo.setAttribute("size",new T.Float32BufferAttribute(sizes,1));geo.setAttribute("phase",new T.Float32BufferAttribute(phases,1));geo.setAttribute("color",new T.Float32BufferAttribute(colors,3));geo.setAttribute("strength",new T.Float32BufferAttribute(strengths,1));
- const material=new T.ShaderMaterial({transparent:true,depthWrite:false,toneMapped:false,blending:T.AdditiveBlending,uniforms:{time:{value:0},scale:{value:1}},vertexShader:`
- attribute float size,phase,strength;attribute vec3 color;varying vec3 tint;varying float ph,lum;
- uniform float scale;
- void main(){tint=color;ph=phase;lum=strength;gl_PointSize=max(1.,size*scale);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
- `,fragmentShader:`
- varying vec3 tint;varying float ph,lum;uniform float time;
- void main(){
-  float r=length(gl_PointCoord-.5)*2.;
-  float core=exp(-r*r*11.);float halo=exp(-r*r*3.4)*.22;
-  float shimmer=.83+.17*sin(time*(.48+.28*sin(ph))+ph);
-  float alpha=(core+halo)*(1.-smoothstep(.74,1.,r))*lum*shimmer;
-  gl_FragColor=vec4(tint,alpha);
- }
- `});
- return new T.Points(geo,material);
-}
-// Live planar reflection. Only the distant landscape is drawn into this small
-// render target; it is regenerated on the GPU, never loaded from an image.
-// A continuous low riparian bank hides the far edge of the water mesh.
-function smoothstepLocal(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
-// Shared earth/grass colors for both the far-bank surface and the blades
-// growing on it. Bake gentle directional shading and atmosphere into the
-// vertices instead of relying on a custom fragment shader.
+// Bake moisture, exposed rock and sky-facing light into a single foothill surface.
+const shoreMud=new T.Color("#3c4939"),shoreMoss=new T.Color("#536b49");
+const hillside=new T.Color("#354a49"),rockDust=new T.Color("#52606b");
 function farBankTint(x,z,y){
- const d=farBank(x)-z,moisture=smoothstepLocal(.02,.98,y-WATER_LEVEL);
- const shade=fbm(x*.13,z*.15,49),swath=noise(x*.085,z*.10,431);
- const wet=new T.Color("#344630"),grass=new T.Color("#526f3d"),deep=new T.Color("#344f36");
- const c=wet.lerp(grass,moisture*(.44+.47*shade));
- c.lerp(deep,.12+.22*swath+.27*smoothstepLocal(12,48,d));
- const dx=(distantBank(x+.3,z)-distantBank(x-.3,z))/.6;
- const dz=(distantBank(x,z+.3)-distantBank(x,z-.3))/.6;
- const normalLight=clamp((1+.31*dx+.42*dz)/Math.sqrt(1+dx*dx+dz*dz),.70,1.16);
- c.multiplyScalar(normalLight*(.89+.17*noise(x*.36,z*.29,553)));
- const haze=smoothstepLocal(36,115,Math.hypot(x,z-15));
- c.lerp(new T.Color("#3a5051"),.13+.25*haze);
- return c;
+ const d=farBank(x)-z;
+ const moss=smoothstepLocal(.02,.9,y-WATER_LEVEL);
+ const shade=fbm(x*.13,z*.15,49),strata=fbm(x*.10+z*.037,z*.13,431);
+ const c=shoreMud.clone().lerp(shoreMoss,moss*(.46+.56*shade));
+ const dx=(distantBank(x+.31,z)-distantBank(x-.31,z))/.62;
+ const dz=(distantBank(x,z+.31)-distantBank(x,z-.31))/.62;
+ const slope=Math.hypot(dx,dz);
+ c.lerp(hillside,.12+smoothstepLocal(4,32,d)*.43);
+ const rock=smoothstepLocal(.14,.49,slope)*smoothstepLocal(.38,.70,strata)*smoothstepLocal(3,18,d);
+ c.lerp(rockDust,.49*rock);
+ const light=clamp((1+.38*dx+.48*dz)/Math.sqrt(1+slope*slope),.65,1.22);
+ c.multiplyScalar(light*(.84+.27*shade));
+ const haze=smoothstepLocal(44,142,Math.hypot(x,z-15));
+ return c.lerp(fogColor,.13+.40*haze);
 }
 function makeFarBank(small){
- const nx=small?180:240,nz=small?80:112;
- const g=new T.PlaneGeometry(198,65,nx,nz);g.rotateX(-Math.PI/2);
+ const g=new T.PlaneGeometry(198,78,small?142:198,small?74:101);
+ g.rotateX(-Math.PI/2);
  const p=g.attributes.position,colors=[];
  for(let i=0;i<p.count;i++){
-  const x=p.getX(i),v=(p.getZ(i)+32.5)/65;
-  const z=farBank(x)-60+v*65,y=distantBank(x,z);
+  const x=p.getX(i),z=farBank(x)+p.getZ(i)-36,y=distantBank(x,z);
   p.setXYZ(i,x,y,z);
-  const c=farBankTint(x,z,y);colors.push(c.r,c.g,c.b);
+  const c=farBankTint(x,z,y);
+  colors.push(c.r,c.g,c.b);
  }
- g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.computeVertexNormals();
- // Standard Three.js path, no custom GLSL, no image or texture.
- const material=new T.MeshBasicMaterial({vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
- const mesh=new T.Mesh(g,material);mesh.layers.enable(1);return mesh;
+ g.setAttribute("color",new T.Float32BufferAttribute(colors,3));
+ const mesh=new T.Mesh(g,new T.MeshBasicMaterial({vertexColors:true,toneMapped:false,fog:false}));
+ mesh.layers.enable(1);
+ return mesh;
 }
-// The water is a curving ribbon, not a rectangular plane extending to the horizon.
-function riverGeometry(small){
- const nx=small?140:190,nz=small?23:34,p=[],uv=[],shore=[],idx=[];
- for(let j=0;j<=nz;j++){
-  const t=j/nz;
-  for(let i=0;i<=nx;i++){
-   const u=i/nx,x=(u-.5)*194,near=nearBank(x)+6,far=farBank(x)-5;
-   const z=far+(near-far)*t;
-   const depth=Math.max(0,WATER_LEVEL-Math.max(ground(x,z),distantBank(x,z)));
-   p.push(x,z,0);uv.push(u,t);shore.push(clamp(depth/1.0,0,1));
-   if(i<nx&&j<nz){const k=j*(nx+1)+i;idx.push(k,k+1,k+nx+1,k+1,k+nx+2,k+nx+1);}
-  }
- }
- const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setAttribute("uv",new T.Float32BufferAttribute(uv,2));g.setAttribute("waterDepth",new T.Float32BufferAttribute(shore,1));g.setIndex(idx);g.computeVertexNormals();
- return g;
-}
-function makeLake(small){
- const level=WATER_LEVEL;
- const target=new T.WebGLRenderTarget(small?320:600,small?320:420,{minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true});
- const mirror=new T.PerspectiveCamera(),projection=new T.Matrix4(),direction=new T.Vector3(),focus=new T.Vector3();
- mirror.layers.set(1);
- const uniforms={time:{value:0},reflection:{value:target.texture},reflectionMatrix:{value:projection},reflectionReady:{value:0},riverFog:{value:fogColor}};
- const mat=new T.ShaderMaterial({side:T.DoubleSide,uniforms,vertexShader:`
-  attribute float waterDepth;varying float depthFade;varying vec3 world;varying vec4 reflected;uniform mat4 reflectionMatrix;uniform float time;
-  void main(){
-   vec3 p=position;depthFade=waterDepth;
-   p.z+=(.005*sin(p.x*.60+p.y*.26+time*.38)+.004*sin(p.y*1.15-p.x*.29-time*.30))*smoothstep(0.,.7,waterDepth);
-   vec4 w=modelMatrix*vec4(p,1.);world=w.xyz;reflected=reflectionMatrix*w;
-   gl_Position=projectionMatrix*viewMatrix*w;
-  }`,fragmentShader:`
-  precision highp float;
-  varying float depthFade;varying vec3 world;varying vec4 reflected;
-  uniform sampler2D reflection;uniform float time,reflectionReady;uniform vec3 riverFog;
-  void main(){
-   vec2 p=world.xz;
-   float flow=p.x-time*.35;
-   float drift=sin(flow*.15+p.y*.09);
-   float q1=flow*.28+p.y*1.1+1.45*drift;
-   float q2=flow*.72-p.y*2.5+sin(flow*.19)*1.2;
-   float q3=flow*.18+p.y*4.1+sin(p.y*.16)*1.5;
-   float a=sin(q1),b=sin(q2),c=sin(q3);
-   vec2 slope=vec2(.28*cos(q1)+.24*cos(q2)+.06*cos(q3),1.1*cos(q1)-.84*cos(q2)+.85*cos(q3));
-   float deep=smoothstep(.035,.95,depthFade);
-   vec3 v=normalize(cameraPosition-world);
-   vec3 surfaceNormal=normalize(vec3(-slope.x*.013,1.,-slope.y*.008));
-   float fresnel=.14+.64*pow(1.-clamp(dot(v,surfaceNormal),0.,1.),3.7);
-   vec2 uv=reflected.xy/max(.0001,reflected.w)*.5+.5;
-   uv+=vec2(slope.x*.0017,slope.y*.0014)*deep;
-   float inside=step(.001,uv.x)*step(uv.x,.999)*step(.001,uv.y)*step(uv.y,.999)*step(.0001,reflected.w);
-   vec2 sampleUV=clamp(uv,vec2(.005),vec2(.995));
-   vec3 refl=texture2D(reflection,sampleUV).rgb*.62;
-   refl+=texture2D(reflection,sampleUV+vec2(.0018,.0023)).rgb*.19;
-   refl+=texture2D(reflection,sampleUV-vec2(.0018,.0023)).rgb*.19;
-   vec3 shallow=vec3(.021,.034,.030),deepColor=vec3(.009,.020,.033);
-   vec3 base=mix(shallow,deepColor,deep);
-   float reflectionMix=fresnel*reflectionReady*inside*(.20+.43*deep);
-   vec3 color=mix(base,refl*vec3(.66,.77,.83),reflectionMix);
-   float glint=pow(max(0.,a*.48+b*.34+c*.18),21.);
-   float patch=.55+.45*sin(flow*.094+p.y*.16+1.6*drift);
-   color+=vec3(.046,.073,.103)*glint*patch*deep*(.25+.75*fresnel);
-   float shoreline=exp(-pow((depthFade-.075)*17.,2.));
-   float brokenEdge=smoothstep(.0,.8,.5+.5*sin(p.x*1.7+sin(p.x*.42+p.y)*2.6));
-   color+=vec3(.009,.014,.013)*shoreline*brokenEdge*(.65+.35*a);
-   // Match distant water to the same atmosphere as the adjacent terrain.
-   float dist=length(cameraPosition-world),haze=1.-exp(-dist*dist*.000081);
-   color=mix(color,riverFog,haze*.44);
-   gl_FragColor=vec4(color,1.);
-   #include <tonemapping_fragment>
-   #include <colorspace_fragment>
-  }`});
- const mesh=new T.Mesh(riverGeometry(small),mat);
- mesh.rotation.x=Math.PI/2;mesh.position.set(0,level,0);
- let last=-Infinity,lastAspect=0;const lastCamera=new T.Vector3(Infinity,0,0),lastDirection=new T.Vector3();
- function reflect(renderer,scene,camera,ms){
-  camera.updateMatrixWorld(true);camera.getWorldDirection(direction);
-  const moved=lastCamera.distanceToSquared(camera.position)>.015||lastDirection.distanceToSquared(direction)>.00004;
-  if(ms-last<(moved?110:420)&&Math.abs(camera.aspect-lastAspect)<.01)return;
-  last=ms;lastAspect=camera.aspect;lastCamera.copy(camera.position);lastDirection.copy(direction);
-  const width=small?320:600,height=Math.max(140,Math.min(small?520:580,Math.round(width/camera.aspect)));
-  if(target.width!==width||target.height!==height)target.setSize(width,height);
-  mirror.position.copy(camera.position);mirror.position.y=2*level-camera.position.y;
-  direction.y=-direction.y;mirror.up.set(0,-1,0);
-  focus.copy(mirror.position).add(direction);mirror.lookAt(focus);
-  mirror.fov=camera.fov;mirror.aspect=camera.aspect;mirror.near=camera.near;mirror.far=camera.far;
-  mirror.updateProjectionMatrix();mirror.updateMatrixWorld(true);
-  projection.multiplyMatrices(mirror.projectionMatrix,mirror.matrixWorldInverse);
-  const previous=renderer.getRenderTarget(),clip=renderer.clippingPlanes;
-  try{
-   renderer.clippingPlanes=[new T.Plane(new T.Vector3(0,1,0),-level+.015)];
-   renderer.setRenderTarget(target);renderer.clear();renderer.render(scene,mirror);
-   uniforms.reflectionReady.value=1;
-  }catch(e){uniforms.reflectionReady.value=0;console.warn("Water reflection unavailable",e);}
-  finally{renderer.setRenderTarget(previous);renderer.clippingPlanes=clip;}
- }
- return {mesh,material:mat,reflect,dispose(){target.dispose();}};
-}
+
 // A grass tuft contains individually shaped curved leaves, not upright uniform strips.
 // Reference techniques: Bezier blades (ChrisHowDev/WebGLProcedualGrass), per-blade
 // variation (gzatravkin/GrassSimulation), root-to-tip color (three-stylized).
@@ -451,8 +270,34 @@ function lawnPatch(seed,segments,leaves){
  g.setAttribute("bladeFlex",new T.Float32BufferAttribute(tips,1));g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.setIndex(idx);
  g.computeVertexNormals();return g;
 }
-function makeMeadow(scene,rand,small){
- const wind={value:0},r=random(923781),o=new T.Object3D();
+function meadowSampler(mesh){
+ const {width,height,widthSegments:nx,heightSegments:nz}=mesh.geometry.parameters;
+ const p=mesh.geometry.attributes.position;
+ return (x,z)=>{
+  const gx=clamp((x+width*.5)*nx/width,0,nx-1e-6),gz=clamp((z-MEADOW_CENTER+height*.5)*nz/height,0,nz-1e-6);
+  const i=Math.floor(gx),j=Math.floor(gz),u=gx-i,v=gz-j,k=i+j*(nx+1);
+  const a=p.getY(k),b=p.getY(k+1),c=p.getY(k+nx+1),d=p.getY(k+nx+2);
+  return u+v<=1?a+(b-a)*u+(c-a)*v:d+(c-d)*(1-u)+(b-d)*(1-v);
+ };
+}
+function treeShade(x,z,roots){
+ let shade=0;
+ for(const root of roots){
+  const dx=(x-root.x)/root.radius,dz=(z-root.z)/(root.radius*.79);
+  const r2=dx*dx+dz*dz;
+  if(r2<1)shade=Math.max(shade,(1-r2)*(1-r2));
+ }
+ return 1-.35*shade;
+}
+function shadeTerrainAtTrees(mesh,roots){
+ const p=mesh.geometry.attributes.position,c=mesh.geometry.attributes.color;
+ for(let i=0;i<p.count;i++){
+  const shade=treeShade(p.getX(i),p.getZ(i),roots);
+  c.setXYZ(i,c.getX(i)*shade,c.getY(i)*shade,c.getZ(i)*shade);
+ }
+}
+function makeMeadow(scene,small,heightAt,roots,wind){
+ const r=random(923781),o=new T.Object3D();
  // Three.js' standard instancing path handles geometry and colors; no custom
  // instancing shader declarations. The only addition is gentle root-fixed wind.
  const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
@@ -462,40 +307,37 @@ function makeMeadow(scene,rand,small){
    .replace("#include <begin_vertex>",`#include <begin_vertex>
     #ifdef USE_INSTANCING
      vec2 q=instanceMatrix[3].xz;
-     float gust=sin(turfWind*.74-q.x*.31-q.y*.27);
-     transformed.x+=bladeFlex*bladeFlex*.055*gust;
-     transformed.z+=bladeFlex*bladeFlex*.035*gust;
+     float gust=.70*sin(turfWind*.81-dot(q,vec2(.27,.34)))+.30*sin(turfWind*1.31+q.x*.53-q.y*.39);
+     transformed.x+=bladeFlex*bladeFlex*.089*gust;
+     transformed.z+=bladeFlex*bladeFlex*.052*gust;
     #endif
    `);
  };
  mat.customProgramCacheKey=()=>"visible-grass-basic-v1";
  const deep=new T.Color("#305324"),green=new T.Color("#679845"),c=new T.Color();
- // Cache exact triangular heightfield. Thousands of patches can sample it
- // without evaluating fractal noise four times per patch.
- const nx=small?180:220,nz=Math.round(nx*.64),dx=140/nx,dz=100/nz;
- const heights=new Float32Array((nx+1)*(nz+1));
- for(let j=0;j<=nz;j++)for(let i=0;i<=nx;i++)heights[i+j*(nx+1)]=ground(-70+i*dx,-29+j*dz);
- function heightAt(x,z){
-  const gx=clamp((x+70)/dx,0,nx-1e-5),gz=clamp((z+29)/dz,0,nz-1e-5),i=Math.floor(gx),j=Math.floor(gz),u=gx-i,v=gz-j,k=i+j*(nx+1);
-  const a=heights[k],b=heights[k+1],c=heights[k+nx+1],d=heights[k+nx+2];
-  return u+v<=1?a+(b-a)*u+(c-a)*v:d+(c-d)*(1-u)+(b-d)*(1-v);
- }
+ const batches=[];
  const zones=[
-  {x0:-18,x1:18,z0:-8,z1:18,step:small?.23:.175,detail:3,leaves:9},
-  {x0:-35,x1:35,z0:-19,z1:25,step:small?.44:.34,detail:2,leaves:6}
+  {x0:small?-11:-18,x1:small?11:18,z0:-9,z1:12,step:small?.23:.175,detail:2,leaves:9},
+  {x0:small?-21:-36,x1:small?21:36,z0:-25,z1:12,step:small?.44:.34,detail:1,leaves:6}
  ];
  for(let k=0;k<zones.length;k++){
   const zone=zones[k],cols=Math.ceil((zone.x1-zone.x0)/zone.step),rows=Math.ceil((zone.z1-zone.z0)/zone.step),list=[];
+  const inner=zones[0];
   for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){
    const x=zone.x0+(i+r())*(zone.x1-zone.x0)/cols,z=zone.z0+(j+r())*(zone.z1-zone.z0)/rows;
-   if(k===1&&x>-18&&x<18&&z>-8&&z<18)continue;
-   const y=heightAt(x,z);if(y<-.95)continue;
+   if(k===1&&x>inner.x0&&x<inner.x1&&z>inner.z0&&z<inner.z1)continue;
+   const y=heightAt(x,z);if(y<WATER_LEVEL+.42)continue;
    const seating=Math.exp(-Math.pow((z+3)/3.1,2))*Math.exp(-Math.pow(x/12,4));
    const broad=noise(x*.20,z*.24,87),far=1-smoothstepLocal(-18,-8,z);
    const transition=Math.exp(-Math.pow((z+10)/5.6,2));
    const swath=noise(x*.22,z*.31,842);
    const h=(.12+.12*Math.pow(r(),1.25))*(.90+.18*broad)*(1-.35*seating)*(1-.28*far)*(1+transition*(swath-.35)*.38);
    list.push([x,y,z,h,broad]);
+  }
+  // Keep adaptive thinning even across the entire lawn.
+  for(let i=list.length-1;i>0;i--){
+   const j=Math.floor(r()*(i+1));
+   [list[i],list[j]]=[list[j],list[i]];
   }
   const mesh=new T.InstancedMesh(lawnPatch(717+k*97,zone.detail,zone.leaves),mat,list.length);
   for(let i=0;i<list.length;i++){
@@ -507,14 +349,23 @@ function makeMeadow(scene,rand,small){
    const coarse=fbm(x*.075,z*.095,17),fine=noise(x*.42,z*.55,79);
    const blend=clamp(.31+coarse*.40+fine*.08+(r()-.5)*.19,0,1);
    const transition=Math.exp(-Math.pow((z+10)/5.6,2));
-   const damp=clamp((z-nearBank(x)-3)/9,0,1);
+   const damp=smoothstepLocal(2,10,z-nearBank(x));
    const swath=noise(x*.18,z*.21,842);
-   c.copy(deep).lerp(green,blend).multiplyScalar((.86+.17*broad)*(1+transition*(swath-.5)*.12-.07*transition*(1-damp)));mesh.setColorAt(i,c);
+   const wash=.94+.12*noise(x*.15+z*.12,z*.10,191);
+   c.copy(deep).lerp(green,blend).multiplyScalar((.86+.17*broad)*wash
+     *(1+transition*(swath-.5)*.12-.10*transition*(1-damp))*treeShade(x,z,roots));
+   mesh.setColorAt(i,c);
   }
   mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;
-  mesh.computeBoundingSphere();mesh.frustumCulled=false;scene.add(mesh);
+  mesh.computeBoundingSphere();scene.add(mesh);
+  batches.push({mesh,count:mesh.count});
  }
- return wind;
+ return quality=>{
+  for(let i=0;i<batches.length;i++){
+   const {mesh,count}=batches[i];
+   mesh.count=Math.round(count*T.MathUtils.lerp(i===0?.77:.54,1,quality));
+  }
+ };
 }
 // Sparse low riverbank growth, in small naturally clustered patches only.
 // Uses the same geometric grass blades and standard material as the meadow.
@@ -525,17 +376,17 @@ function makeDistantGroundCover(scene,small){
  const mountain=mountainHeight(87,-61,17,15);
  const g=lawnPatch(811,2,7);
  const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
- const spacing=small?.74:.53;
+ const spacing=small?.79:.55;
  for(let x0=-58;x0<58;x0+=spacing){
-  for(let d0=3.4;d0<17.0;d0+=spacing){
+  for(let d0=1.45;d0<27.0;d0+=spacing){
    const x=x0+r()*spacing,d=d0+r()*spacing,z=farBank(x)-d;
    const y=distantBank(x,z);
    // Never put grass over a mountain surface or in the water.
-   if(y<WATER_LEVEL+.30||mountain(x,z)>y-.12)continue;
+   if(y<WATER_LEVEL+.21||mountain(x,z)>y-.12)continue;
    const patch=noise(x*.20,z*.24,591);
-   const fade=smoothstepLocal(3.4,6.1,d)*(1-smoothstepLocal(12,17,d));
-   if(r()>fade*(.50+.45*patch))continue;
-   items.push([x,y,z,(.10+.11*r())*(.65+.35*fade),patch]);
+   const fade=smoothstepLocal(1.4,5.4,d)*(1-smoothstepLocal(11,27,d));
+   if(r()>fade*smoothstepLocal(.24,.63,patch)*.94)continue;
+   items.push([x,y,z,(.13+.22*r())*(.53+.47*fade),patch]);
   }
  }
  if(!items.length){g.dispose();mat.dispose();return;}
@@ -547,17 +398,17 @@ function makeDistantGroundCover(scene,small){
   mesh.setColorAt(i,farBankTint(x,z,y).multiplyScalar(.94+.12*p));
  });
  mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
- mesh.computeBoundingSphere();mesh.layers.enable(1);scene.add(mesh);
+ mesh.computeBoundingSphere();scene.add(mesh);
 }
 
-function makeFieldTransition(scene,small){
+function makeFieldTransition(scene,small,heightAt){
  const r=random(55491),o=new T.Object3D(),items=[];
  const centers=[[-26,7],[-18,9],[-10,7.2],[3.5,8.0],[13,6.5],[22,7.8],[30,6.0]];
  for(const [cx,offset] of centers){
   const count=small?18:32;
   for(let j=0;j<count;j++){
    const x=cx+(r()-.5)*3.8,z=nearBank(x)+offset+(r()-.5)*2.5;
-   const y=ground(x,z);if(y<-.80||z>-6)continue;
+   const y=heightAt(x,z);if(y<WATER_LEVEL+.45||z>-6)continue;
    items.push([x,y,z,.13+.17*r(),r()]);
   }
  }
@@ -576,26 +427,17 @@ function makeFieldTransition(scene,small){
 // Low weathered rocks, embedded in the earth, with procedural mineral and moss colors.
 // Small broadleaf ground cover provides an organic transition from lawn to woodland.
 // Riparian detail follows the actual water height rather than a straight strip.
-function makeRiverEdges(scene,small){
+function makeRiverEdges(scene,small,heightAt){
  const r=random(70061),o=new T.Object3D();
- function shoreAt(x,far){
-  const base=far?farBank(x):nearBank(x);
-  let lo=base-6,hi=base+9;
-  const height=far?distantBank:ground;
-  for(let i=0;i<13;i++){
-   const z=(lo+hi)*.5;
-   if((height(x,z)>WATER_LEVEL)===far)lo=z;else hi=z;
-  }
-  return (lo+hi)*.5;
- }
+ function shoreAt(x,far){return far?farBank(x):nearBank(x);}
  const n=small?160:300,reed=new T.InstancedMesh(tuftGeometry(927,6,5),new T.MeshStandardMaterial({color:"#ffffff",vertexColors:true,roughness:1,side:T.DoubleSide}),n);
  const a=new T.Color("#465444"),b=new T.Color("#6d7852");
  for(let i=0;i<n;i++){
   const far=i%3!==0;
   let x=(r()-.5)*(far?140:55);
   for(let j=0;j<5&&fbm(x*.25,far?4:1,781)<.47;j++)x=(r()-.5)*(far?140:55);
-  const z=shoreAt(x,far)+(far?-1:1)*(.35+Math.pow(r(),2)*1.3),y=(far?distantBank:ground)(x,z);
-  const h=.12+Math.pow(r(),2)*.23;
+  const z=shoreAt(x,far)+(far?-1:1)*(.48+Math.pow(r(),2)*1.45),y=(far?distantBank:heightAt)(x,z);
+  const h=.13+Math.pow(r(),2)*.43;
   o.position.set(x,y-.015,z);o.rotation.set(0,r()*TAU,0);o.scale.set(h*.86,h,h*.86);o.updateMatrix();reed.setMatrixAt(i,o.matrix);reed.setColorAt(i,a.clone().lerp(b,r()*.9));
  }
  scene.add(reed);
@@ -605,14 +447,14 @@ function makeRiverEdges(scene,small){
  const count=small?90:180,stones=new T.InstancedMesh(stoneGeo,new T.MeshStandardMaterial({color:"#ffffff",roughness:.98}),count);
  const c=new T.Color("#50574c"),d=new T.Color("#7b7566");
  for(let i=0;i<count;i++){
-  const x=(r()-.5)*60,far=i%4===0,z=shoreAt(x,far)+(far?-1:1)*(.13+r()*.9);
-  const y=(far?distantBank:ground)(x,z),radius=.035+Math.pow(r(),3)*.18;
+  const x=(r()-.5)*60,far=i%4===0,z=shoreAt(x,far)+(far?-1:1)*(.12+r()*1.14);
+  const y=(far?distantBank:heightAt)(x,z),radius=.039+Math.pow(r(),3)*.29;
   o.position.set(x,y-.025,z);o.rotation.set(r()*.28,r()*TAU,r()*.2);o.scale.set(radius*1.3,radius*.42,radius*.9);o.updateMatrix();stones.setMatrixAt(i,o.matrix);stones.setColorAt(i,c.clone().lerp(d,r()));
  }
  scene.add(stones);
 }
 
-function makeGroundCover(scene,small){
+function makeGroundCover(scene,small,heightAt){
  const r=random(91401),positions=[],colors=[],indices=[];
  const shadow=new T.Color("#344b35"),tip=new T.Color("#7a9261");
  for(let frond=0;frond<7;frond++){
@@ -637,7 +479,7 @@ function makeGroundCover(scene,small){
  for(let i=0;i<n;i++){
   let x=0,z=0,y=-3;
   for(let k=0;k<20;k++){
-   x=(r()<.5?-1:1)*(6+r()*14);z=-17+r()*18;y=ground(x,z);
+   x=(r()<.5?-1:1)*(6+r()*14);z=-17+r()*18;y=heightAt(x,z);
    if(y>-.8&&fbm(x*.22,z*.19,781)>.46&&Math.abs(z+3)>2.2)break;
   }
   const size=.13+r()*.24;
@@ -646,7 +488,7 @@ function makeGroundCover(scene,small){
  scene.add(m);
 }
 
-function makeRocks(scene,rand){
+function makeRocks(scene,heightAt){
  const r=random(23988),o=new T.Object3D(),dark=new T.Color("#414b49"),light=new T.Color("#77796a");
  for(let variant=0;variant<3;variant++){
   const geo=new T.IcosahedronGeometry(1,3),p=geo.attributes.position;
@@ -659,7 +501,7 @@ function makeRocks(scene,rand){
   for(let i=0;i<12;i++){
    let x=(r()<.5?-1:1)*(12+r()*13),z=-17+r()*22;
    if(i%5===0){x=(r()-.5)*29;z=-15+r()*3;}
-   const y=ground(x,z),radius=.09+Math.pow(r(),2.8)*.68;
+   const y=heightAt(x,z),radius=.09+Math.pow(r(),2.8)*.68;
    o.position.set(x,y<-.95?-20:y-.07,z);o.scale.set(radius*(1.3+r()*.5),radius*.43,radius*(.8+r()*.3));
    o.rotation.set(r()*.4,r()*TAU,r()*.4);o.updateMatrix();mesh.setMatrixAt(i,o.matrix);mesh.setColorAt(i,dark.clone().lerp(light,r()*.85));
   }
@@ -678,21 +520,47 @@ function addBranch(buffer,curve,r0,r1,steps,sides,color,seed){
    const angle=j/sides*TAU,k=1+.12*Math.sin(angle*3+t*9+seed)+.045*Math.sin(angle*5-t*17);
    const q=c.clone().addScaledVector(n,Math.cos(angle)*r*k).addScaledVector(b,Math.sin(angle)*r*k);
    buffer.p.push(q.x,q.y,q.z);
+   buffer.flex.push(Math.max(0,q.y-buffer.baseY));
    const shade=.73+.23*Math.sin(angle*3+seed)*Math.sin(angle*3+seed)+.12*t;
    buffer.c.push(color.r*shade,color.g*shade,color.b*shade);
    if(i<steps){const a=offset+i*sides+j,e=offset+i*sides+(j+1)%sides;buffer.i.push(a,e,a+sides,e,e+sides,a+sides);}
   }
  }
 }
-function branchMesh(data){
+
+function treeWind(material,wind,leaves=false){
+ material.onBeforeCompile=shader=>{
+  shader.uniforms.treeTime=wind;
+  shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nuniform float treeTime;\nattribute float treeFlex;");
+  if(leaves){
+   shader.vertexShader=shader.vertexShader.replace("#include <begin_vertex>",`#include <begin_vertex>
+    float leafPhase=dot(instanceMatrix[3].xz,vec2(4.1,3.3));
+    transformed.z+=.088*sin(treeTime*2.41+leafPhase)*position.y;
+   `);
+  }
+  const project=T.ShaderChunk.project_vertex.replace("mvPosition = modelViewMatrix",`
+    vec2 treePosition=(modelMatrix * mvPosition).xz;
+    float gust=sin(treeTime*.81-dot(treePosition,vec2(.27,.34)));
+    float flex=treeFlex*treeFlex;
+    mvPosition.x+=.0037*flex*gust;
+    mvPosition.z+=.0024*flex*gust;
+    mvPosition = modelViewMatrix
+  `);
+  shader.vertexShader=shader.vertexShader.replace("#include <project_vertex>",project);
+ };
+ material.customProgramCacheKey=()=>leaves?"leaf-wind":"branch-wind";
+ return material;
+}
+function branchMesh(data,wind){
  const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(data.p,3));g.setAttribute("color",new T.Float32BufferAttribute(data.c,3));g.setIndex(data.i);g.computeVertexNormals();
- return new T.Mesh(g,new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}));
+ g.setAttribute("treeFlex",new T.Float32BufferAttribute(data.flex,1));
+ return new T.Mesh(g,treeWind(new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}),wind));
 }
 function curveOf(a,b,c){return new T.CatmullRomCurve3([a,b,c]);}
 // Deciduous woodland, with the original memory tree kept separately.
-function makeWoodland(scene,rand,small,distant=false){
- const r=random(distant?731459:839127),data={p:[],c:[],i:[]},clusters=[],o=new T.Object3D();
- const bark=new T.Color("#594b40"),dark=new T.Color("#34583b"),light=new T.Color("#72955d");
+function makeWoodland(scene,small,heightAt,wind,distant=false){
+ const r=random(distant?731459:839127),data={p:[],c:[],i:[],flex:[],baseY:0},clusters=[],roots=[],o=new T.Object3D();
+ const bark=new T.Color("#594b40"),dark=new T.Color("#2b4b39"),light=new T.Color("#648267");
  // A few deciduous trees frame the clearing, with the memory tree remaining
  // the distinctive foreground specimen. No evenly spaced avenue or conical crowns.
  const sites=small?[
@@ -711,17 +579,20 @@ function makeWoodland(scene,rand,small,distant=false){
  ];
  const memoryX=small?-3.8:-7.8;
  function makeTree(x,z,height,seed){
-  const y=distant?distantBank(x,z):ground(x,z);
-  if(y<-.65||(!distant&&Math.hypot(x-memoryX,z+10.8)<4.3))return;
+  const y=heightAt(x,z);
+  if(y<WATER_LEVEL+.53||(!distant&&Math.hypot(x-memoryX,z+10.8)<3.5))return;
+  roots.push({x,z,radius:height*.47});
+  data.baseY=y;
   const spread=height*(.32+r()*.08),lean=(r()-.5)*height*.16,leanZ=(r()-.5)*height*.10;
-  const base=new T.Vector3(x,y-.03,z),mid=new T.Vector3(x+lean*.24,y+height*.32,z+leanZ*.25);
+  const base=new T.Vector3(x,y-.074,z),mid=new T.Vector3(x+lean*.24,y+height*.32,z+leanZ*.25);
   const tip=new T.Vector3(x+lean,y+height*.70,z+leanZ);
   const trunk=curveOf(base,mid,tip);
   const radius=height*(.040+r()*.009);
-  addBranch(data,trunk,radius,.023*height,16,10,bark,seed);
+  addBranch(data,trunk,radius,.020*height,distant?8:16,distant?7:10,bark,seed);
   for(let k=0;k<4;k++){
    const angle=k*TAU/4+r()*.6,dx=Math.cos(angle),dz=Math.sin(angle);
-   const e=new T.Vector3(x+dx*radius*2.5,y-.025,z+dz*radius*2.5);
+   const ex=x+dx*radius*2.5,ez=z+dz*radius*2.5;
+   const e=new T.Vector3(ex,heightAt(ex,ez)-.052,ez);
    addBranch(data,curveOf(new T.Vector3(x,y+radius*.85,z),new T.Vector3(x+dx*radius*1.5,y+.02,z+dz*radius*1.5),e),radius*.45,.009,5,6,bark,seed+k);
   }
   function grow(start,dir,len,width,depth){
@@ -732,10 +603,11 @@ function makeWoodland(scene,rand,small,distant=false){
    if(depth===0){
     // Small, irregular overlapping foliage volumes along terminal twigs.
     // The leaves themselves will be individual meshes scattered inside them.
-    const size=height*(.072+r()*.036);
-    for(let j=0;j<3;j++){
-     const t=.40+j*.29;
-     clusters.push({center:curve.getPointAt(t),size:size*(.80+r()*.35),tone:.23+r()*.49,seed:r()*10000});
+    const size=height*((distant?.125:.083)+r()*.049);
+    const tuftCount=distant?4:3;
+    for(let j=0;j<tuftCount;j++){
+     const t=.32+j*.66/(tuftCount-1);
+     clusters.push({center:curve.getPointAt(t),size:size*(.72+r()*.48),baseY:y,tone:.18+r()*.64,seed:r()*10000});
     }
     return;
    }
@@ -746,35 +618,37 @@ function makeWoodland(scene,rand,small,distant=false){
     grow(curve.getPointAt(.55+j*.40/Math.max(1,children-1)),d,len*(.55+r()*.17),width*.47,depth-1);
    }
   }
-  const main=6+Math.floor(r()*2),rotation=r()*TAU;
+  const main=(distant?4:6)+Math.floor(r()*2),rotation=r()*TAU;
   for(let k=0;k<main;k++){
    const t=.36+.61*k/(main-1),angle=k*2.399963+rotation;
    const d=new T.Vector3(Math.cos(angle)*(.78+.14*r()),.53+.26*r(),Math.sin(angle)*(.78+.14*r())).normalize();
-   grow(trunk.getPointAt(t),d,spread*(.78+r()*.28)*(1-.19*t),radius*(.37-.12*t),2);
+   grow(trunk.getPointAt(t),d,spread*(.78+r()*.28)*(1-.19*t),radius*(.37-.12*t),distant?1:2);
   }
-  grow(tip,new T.Vector3(lean*.20,1,leanZ*.20).normalize(),height*.22,radius*.23,2);
+  grow(tip,new T.Vector3(lean*.20,1,leanZ*.20).normalize(),height*.22,radius*.23,distant?1:2);
  }
  if(distant){
   // Irregular little groves with openings through to the mountains.
-  const groves=[[-41,5],[-24,4],[12,3],[28,4],[47,4]];
+  const groves=[[-46,4],[-31,5],[-18,4],[-5,4],[8,5],[21,3],[35,5],[49,4]];
+  const mountains=mountainHeight(87,-61,17,15);
   const placed=[];
   let seed=0;
   for(const [center,count] of groves){
    for(let j=0;j<(small?Math.max(2,count-1):count);j++){
     for(let attempt=0;attempt<12;attempt++){
-     const x=center+(r()-.5)*13,z=farBank(x)-5.0-r()*5.8;
+     const x=center+(r()-.5)*13,z=farBank(x)-2.7-r()*18;
      if(placed.some(q=>Math.hypot(q[0]-x,q[1]-z)<2.4))continue;
-     if(distantBank(x,z)<-.38)continue;
-     const mountain=mountainHeight(87,-61,17,15)(x,z);
-     if(mountain>distantBank(x,z)+.4)continue;
-     const h=1.45+Math.pow(r(),1.2)*1.30;
+     const y=heightAt(x,z);
+     if(y<WATER_LEVEL+.46||mountains(x,z)>y-.09)continue;
+     const h=.9+Math.pow(r(),1.3)*1.85;
      placed.push([x,z]);makeTree(x,z,h,++seed);break;
     }
    }
   }
- }else sites.forEach(([x,z,h],i)=>makeTree(x,z,h,i+1));
- if(!clusters.length)return;
- scene.add(branchMesh(data));
+ }else sites.forEach(([x,z,h],i)=>makeTree(x,Math.max(z,nearBank(x)+5.5),h,i+1));
+ if(!clusters.length)return roots;
+ const branches=branchMesh(data,wind);
+ if(distant)branches.layers.enable(1);
+ scene.add(branches);
  // Small folded, oval leaves, geometrically rendered with standard instance
  // colors. Use many overlapping leaves instead of balls, disks or image cards.
  const p=[],idx=[],cols=[];
@@ -788,8 +662,9 @@ function makeWoodland(scene,rand,small,distant=false){
  g.setAttribute("position",new T.Float32BufferAttribute(p,3));
  g.setAttribute("color",new T.Float32BufferAttribute(cols,3));
  g.setIndex(idx);g.computeVertexNormals();
- const m=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:true});
- const countPer=distant?(small?13:20):(small?25:43);
+ const m=treeWind(new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:true}),wind,true);
+ const countPer=distant?(small?10:15):(small?23:35);
+ const heights=new Float32Array(clusters.length*countPer);
  const mesh=new T.InstancedMesh(g,m,clusters.length*countPer);
  let i=0;
  for(const c of clusters){
@@ -798,34 +673,40 @@ function makeWoodland(scene,rand,small,distant=false){
    const dx=Math.cos(az)*radial,dz=Math.sin(az)*radial;
    o.position.copy(c.center).add(new T.Vector3(dx*radius*1.23,vertical*radius*.75,dz*radius));
    o.rotation.set((r()-.5)*2.7,r()*TAU,(r()-.5)*2.6);
-   const leaf=c.size*(.23+r()*.24);
+   const leaf=c.size*(.22+r()*.30);
    o.scale.set(leaf*.85,leaf,leaf);o.updateMatrix();
    mesh.setMatrixAt(i,o.matrix);
-   mesh.setColorAt(i,dark.clone().lerp(light,Math.max(0,Math.min(1,c.tone+vertical*.12+(r()-.5)*.22))).multiplyScalar(.76+.18*r()));
+   heights[i]=Math.max(0,o.position.y-c.baseY);
+   mesh.setColorAt(i,dark.clone().lerp(light,clamp(c.tone+vertical*.14+(r()-.5)*.22,0,1)).multiplyScalar(.67+.27*r()));
    i++;
   }
  }
  mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
- mesh.computeBoundingSphere();scene.add(mesh);
+ g.setAttribute("treeFlex",new T.InstancedBufferAttribute(heights,1));
+ mesh.computeBoundingSphere();
+ if(distant)mesh.layers.enable(1);
+ scene.add(mesh);
+ return roots;
 }
-function makeMemoryTree(scene,rand,small){
- const r=random(193781),group=new T.Group(),data={p:[],c:[],i:[]};
- const x=small?-3.8:-7.8,z=-10.8;group.position.set(x,ground(x,z),z);
- const bark=new T.Color("#64524b"),twigs=[],canopy=[];
+function makeMemoryTree(scene,small,heightAt,wind){
+ const r=random(193781),group=new T.Group(),data={p:[],c:[],i:[],flex:[],baseY:0};
+ const x=small?-3.8:-7.8,z=-10.8;group.position.set(x,heightAt(x,z)-.045,z);
+ const bark=new T.Color("#64524b"),twigs=[];
  const root=new T.Vector3(0,0,0),baseTip=new T.Vector3(.12,2.65,-.10);
  const trunk=curveOf(root,new T.Vector3(-.17,1.35,.12),baseTip);
  addBranch(data,trunk,.255,.065,18,12,bark,1);
  // Flared roots blend into the ground instead of the trunk ending at a flat disk.
  for(let i=0;i<6;i++){
   const a=i*TAU/6+r()*.35,len=.47+r()*.34;
-  const end=new T.Vector3(Math.cos(a)*len,-.05,Math.sin(a)*len);
+  const dx=Math.cos(a)*len,dz=Math.sin(a)*len;
+  const end=new T.Vector3(dx,heightAt(x+dx,z+dz)-group.position.y-.055,dz);
   addBranch(data,curveOf(new T.Vector3(0,.19,0),end.clone().multiplyScalar(.5).add(new T.Vector3(0,.035,0)),end),.095,.008,7,7,bark,i);
  }
  function grow(a,d,len,rad,depth){
   const end=a.clone().addScaledVector(d,len),mid=a.clone().lerp(end,.47).add(new T.Vector3((r()-.5)*len*.22,-len*.07,(r()-.5)*len*.22));
   const curve=curveOf(a,mid,end);
   addBranch(data,curve,rad,rad*.31,depth>1?8:5,depth>1?7:5,bark,r()*TAU);
-  if(depth<1){twigs.push(curve);canopy.push(end);return;}
+  if(depth<1){twigs.push(curve);return;}
   const n=depth===3?3:2;
   for(let j=0;j<n;j++){
    const angle=r()*TAU+j*2.39996,child=d.clone().multiplyScalar(.48).add(new T.Vector3(Math.cos(angle)*.61,.22+r()*.36,Math.sin(angle)*.61)).normalize();
@@ -837,7 +718,7 @@ function makeMemoryTree(scene,rand,small){
   grow(a,new T.Vector3(Math.cos(angle)*.82,.56+r()*.31,Math.sin(angle)*.82).normalize(),1.0+r()*.6,.095*(1-t*.5),3);
  }
  grow(baseTip,new T.Vector3(.06,1,.02),.95,.055,2);
- group.add(branchMesh(data));
+ group.add(branchMesh(data,wind));
  const leafGeo=new T.BufferGeometry(),lp=[],li=[],lc=[];
  for(let i=0;i<=8;i++){
   const t=i/8,w=.048*Math.sin(t*Math.PI)**.77,y=(t-.5)*.16;
@@ -846,21 +727,23 @@ function makeMemoryTree(scene,rand,small){
   if(i<8){const a=i*3;li.push(a,a+1,a+3,a+1,a+4,a+3,a+1,a+2,a+4,a+2,a+5,a+4);}
  }
  leafGeo.setAttribute("position",new T.Float32BufferAttribute(lp,3));leafGeo.setAttribute("color",new T.Float32BufferAttribute(lc,3));leafGeo.setIndex(li);leafGeo.computeVertexNormals();
- const mat=new T.MeshStandardMaterial({color:"#ffffff",vertexColors:true,emissive:"#407d72",emissiveIntensity:.30,roughness:.85,side:T.DoubleSide});
+ const mat=treeWind(new T.MeshStandardMaterial({color:"#ffffff",vertexColors:true,emissive:"#407568",emissiveIntensity:.26,roughness:.85,side:T.DoubleSide}),wind,true);
  const each=small?18:29,leaves=new T.InstancedMesh(leafGeo,mat,twigs.length*each),o=new T.Object3D();
  const a=new T.Color("#486b59"),b=new T.Color("#94b49a"),Y=new T.Vector3(0,1,0);
+ const heights=new Float32Array(leaves.count);
  let k=0;
  for(const twig of twigs){
   for(let i=0;i<each;i++){
    const t=.23+r()*.77,origin=twig.getPointAt(t),angle=i*2.399963;
    const d=new T.Vector3(Math.cos(angle),.20+r()*.55,Math.sin(angle)).normalize();
    o.position.copy(origin).addScaledVector(d,.06+r()*.12);o.quaternion.setFromUnitVectors(Y,d);o.rotateY(r()*.9);
-   const scale=.62+r()*.68;o.scale.set(scale,scale,scale);o.updateMatrix();leaves.setMatrixAt(k,o.matrix);leaves.setColorAt(k++,a.clone().lerp(b,r()));
+   const scale=.62+r()*.68;o.scale.set(scale,scale,scale);o.updateMatrix();leaves.setMatrixAt(k,o.matrix);heights[k]=o.position.y;leaves.setColorAt(k++,a.clone().lerp(b,r()));
   }
  }
+ leafGeo.setAttribute("treeFlex",new T.InstancedBufferAttribute(heights,1));
  group.add(leaves);scene.add(group);return {group,mat,leaves};
 }
-function contactShadow(radiusX,radiusZ,strength){
+function contactShadow(radiusX,radiusZ,strength,heightAt){
   const g=new T.PlaneGeometry(radiusX*2,radiusZ*2,12,12);g.rotateX(-Math.PI/2);
   const m=new T.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{strength:{value:strength}},vertexShader:`
     varying vec2 coord;void main(){coord=uv*2.-1.;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
@@ -869,7 +752,7 @@ function contactShadow(radiusX,radiusZ,strength){
   `});
   const mesh=new T.Mesh(g,m);mesh.renderOrder=2;
   const p=g.attributes.position,base=Float32Array.from(p.array);
-  return {mesh,place(x,z,scale=1){mesh.position.set(x,0,z);mesh.scale.set(scale,1,scale);for(let i=0;i<p.count;i++){const px=base[i*3],pz=base[i*3+2];p.setY(i,ground(x+px*scale,z+pz*scale)+.025);}p.needsUpdate=true;g.computeBoundingSphere();},dispose(){g.dispose();m.dispose();}};
+  return {mesh,place(x,z,scale=1){mesh.position.set(x,0,z);mesh.scale.set(scale,1,scale);for(let i=0;i<p.count;i++){const px=base[i*3],pz=base[i*3+2];p.setY(i,heightAt(x+px*scale,z+pz*scale)+.025);}p.needsUpdate=true;g.computeBoundingSphere();},dispose(){g.dispose();m.dispose();}};
 }
 
 // A subtle ribbon of animated water vapour. The translucent surface follows
@@ -877,8 +760,8 @@ function contactShadow(radiusX,radiusZ,strength){
 function makeValleyMist(){
  const p=[],uv=[],idx=[],n=120;
  for(let i=0;i<=n;i++){
-  const u=i/n,x=(u-.5)*142,z=farBank(x)+1.6;
-  p.push(x,WATER_LEVEL+.10,z,x,WATER_LEVEL+1.45+.32*noise(x*.08,0,37),z-.75);
+  const u=i/n,x=(u-.5)*142,z=farBank(x)+1.25;
+  p.push(x,WATER_LEVEL+.10,z,x,WATER_LEVEL+.96+.71*noise(x*.092,0,37),z-.75);
   uv.push(u,0,u,1);
   if(i<n){const a=i*2;idx.push(a,a+2,a+1,a+1,a+2,a+3);}
  }
@@ -892,7 +775,7 @@ function makeValleyMist(){
    float envelope=sin(y*3.14159265)*smoothstep(0.,.12,x)*(1.-smoothstep(.88,1.,x));
    float drift=.50+.25*sin(x*36.-time*.10+sin(x*14.)*1.8)+.18*sin(x*78.+time*.05);
    float alpha=envelope*max(0.,drift)*.052;
-   gl_FragColor=vec4(.12,.20,.25,alpha);
+   gl_FragColor=vec4(.105,.157,.205,alpha);
    #include <colorspace_fragment>
   }
  `});
@@ -900,63 +783,171 @@ function makeValleyMist(){
 }
 
 export function createLiveOverlook(){
- const small=window.innerWidth<760,rand=random(2261127);
+ const small=window.innerWidth<760;
  const renderer=new T.WebGLRenderer({antialias:!small,powerPreference:"high-performance",alpha:false,preserveDrawingBuffer:true});
- renderer.setPixelRatio(1);renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.13;
- const scene=new T.Scene();scene.fog=new T.FogExp2(fogColor,.009);
- const camera=new T.PerspectiveCamera(49,1,.1,700);camera.position.set(0,3.0,15);camera.lookAt(0,9.4,-48);
- const ambient=new T.HemisphereLight("#c3d2ff","#48564b",1.60);scene.add(ambient);
- const moonlight=new T.DirectionalLight("#c6d9ff",2.35);moonlight.position.set(-28,19,-30);scene.add(moonlight);
- const rim=new T.DirectionalLight("#f0c5b4",.52);rim.position.set(35,8,-40);scene.add(rim);
- const sky=makeSky(),stars=makeStars(rand);scene.add(sky,stars);sky.layers.enable(1);stars.layers.enable(1);
- scene.add(meshTerrain(240,112,180,-142,mountainHeight(11,-143,42,29),"#263953","#8496be"));
- scene.add(meshTerrain(200,90,156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"));
- scene.add(meshTerrain(155,62,132,-60,mountainHeight(87,-61,17,15),"#1b313e","#456771"));
- for(const object of scene.children)if(object.isMesh||object.isLight)object.layers.enable(1);
- scene.add(makeFarBank(small));makeDistantGroundCover(scene,small);
- const lake=makeLake(small);scene.add(lake.mesh);
- scene.add(meshTerrain(140,100,small?180:220,21,ground,"#264b23","#608b40"));
- const wind=makeMeadow(scene,rand,small);makeRocks(scene,rand);makeRiverEdges(scene,small);makeFieldTransition(scene,small);
- const beforeForest=new Set(scene.children);makeWoodland(scene,rand,small);makeWoodland(scene,rand,small,true);
- for(const object of scene.children)if(!beforeForest.has(object))object.layers.enable(1);
- const mist=makeValleyMist();scene.add(mist);
- const tree=makeMemoryTree(scene,rand,small);const people=new Map();
- let w=0,h=0,last=-Infinity,dead=false;
- const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
- function render(ctx,width,height,ms,peers,count){
-   if(dead||renderer.getContext().isContextLost())return false;
-   const scale=Math.min(small?1.0:1.25,Math.sqrt((small?650000:1400000)/Math.max(1,width*height)));
-   const nw=Math.max(1,Math.round(width*scale)),nh=Math.max(1,Math.round(height*scale));
-   if(nw!==w||nh!==h){w=nw;h=nh;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();last=-Infinity;}
-   if(ms-last>=1000/(small?24:30)){
-     const dt=Number.isFinite(last)?Math.min(.12,(ms-last)*.001):.033;const t=reduced?0:ms*.001;sky.material.uniforms.time.value=t;stars.material.uniforms.time.value=t;stars.material.uniforms.scale.value=scale;
-     lake.material.uniforms.time.value=t;wind.value=t;mist.material.uniforms.time.value=t;
-     tree.mat.emissiveIntensity=.22+Math.min(1.0,count*.013)+.08*Math.sin(t*.8);
-     const ids=new Set(peers.map(p=>p.id));
-     for(const [id,v] of people)if(!ids.has(id)){scene.remove(v.root,v.shadow.mesh);people.delete(id);v.shadow.dispose();v.dispose();}
-     // When seated, bring the camera closer and lower it, retaining a broad sky.
-     const close=peers.length>0;
-     const distance=close?(small?10.4:12.5):15;
-     const eyeY=close?2.65:3.0;
-     camera.position.z+=(distance-camera.position.z)*Math.min(1,dt*3.2);
-     camera.position.y+=(eyeY-camera.position.y)*Math.min(1,dt*3.2);
-     camera.lookAt(0,close?6.0:9.4,-48);
-     for(const p of peers){
-       let v=people.get(p.id);if(!v){v=createHuman(p.hue);v.shadow=contactShadow(.75,.85,.58);people.set(p.id,v);scene.add(v.root,v.shadow.mesh);}
-       const z=-3.0,span=2*(camera.position.z-z)*Math.tan(camera.fov*Math.PI/360)*camera.aspect;
-       const x=(p.x-.5)*span*.98;
-       const stagger=small&&peers.length>4?(Math.round(p.x*100)%2)*.48:0;
-       v.root.position.set(x,ground(x,z-stagger)+.04,z-stagger);
-       v.root.scale.setScalar(small&&peers.length>5?.86:1.06);
-       v.shadow.place(x,z-stagger,p.pose==="lie"?1.35:.95);
-       v.update(p,t,Date.now(),dt,reduced);
-       if(p.pose==="lie")v.root.position.y+=.22;
-     }
-     lake.reflect(renderer,scene,camera,ms);
-     renderer.render(scene,camera);last=ms;
-   }
-   ctx.drawImage(renderer.domElement,0,0,width,height);return true;
+ renderer.setPixelRatio(1);
+ renderer.outputColorSpace=T.SRGBColorSpace;
+ renderer.toneMapping=T.ACESFilmicToneMapping;
+ renderer.toneMappingExposure=1.07;
+ const scene=new T.Scene();
+ scene.fog=new T.FogExp2(fogColor,.009);
+ const camera=new T.PerspectiveCamera(49,1,.1,700);
+ camera.position.set(0,4.31,15);
+ let aimY=10.6;
+ camera.lookAt(0,aimY,-48);
+ const ambient=new T.HemisphereLight("#cbd7ff","#445446",1.45);
+ const moonlight=new T.DirectionalLight("#c6dcff",2.15);
+ moonlight.position.set(-28,19,-30);
+ const rim=new T.DirectionalLight("#d9bfdf",.50);
+ rim.position.set(35,8,-40);
+ const sky=makeSky(),stars=makeStars(random(83921),small);
+ const ranges=[
+  meshTerrain(240,112,small?146:180,-142,mountainHeight(11,-143,42,29),"#263953","#8496be"),
+  meshTerrain(200,90,small?124:156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"),
+  meshTerrain(155,62,small?110:132,-60,mountainHeight(87,-61,17,15),"#1c313d","#4b696d")
+ ];
+ for(const object of [ambient,moonlight,rim,sky,stars,...ranges]){
+  object.layers.enable(1);
+  scene.add(object);
  }
- function dispose(){dead=true;lake.dispose();for(const v of people.values()){scene.remove(v.root,v.shadow.mesh);v.shadow.dispose();v.dispose();}people.clear();scene.traverse(o=>{if(o.isMesh||o.isPoints){if(o.geometry&&!o.geometry.userData.sharedHuman)o.geometry.dispose();const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>m?.dispose());}});renderer.dispose();renderer.forceContextLoss();}
+ const farTerrain=makeFarBank(small),wind={value:0};
+ const meadow=meshTerrain(MEADOW_WIDTH,MEADOW_DEPTH,small?172:226,MEADOW_CENTER,ground,"#264b23","#608b40");
+ const heightAt=meadowSampler(meadow);
+ const lake=makeRiver({small,nearBank,farBank,ground,foothill:distantBank,level:WATER_LEVEL,fogColor});
+ const mist=makeValleyMist(),meteors=makeMeteorLights();
+ scene.add(meadow,farTerrain,lake.mesh,mist,meteors.mesh);
+ const meadowTrees=makeWoodland(scene,small,heightAt,wind);
+ const farTrees=makeWoodland(scene,small,distantBank,wind,true);
+ const tree=makeMemoryTree(scene,small,heightAt,wind);
+ meadowTrees.push({x:tree.group.position.x,z:tree.group.position.z,radius:1.8});
+ shadeTerrainAtTrees(meadow,meadowTrees);
+ shadeTerrainAtTrees(farTerrain,farTrees);
+ const setGrassQuality=makeMeadow(scene,small,heightAt,meadowTrees,wind);
+ makeDistantGroundCover(scene,small);
+ makeRocks(scene,heightAt);
+ makeRiverEdges(scene,small,heightAt);
+ makeFieldTransition(scene,small,heightAt);
+ makeGroundCover(scene,small,heightAt);
+
+ const people=new Map();
+ const motion=window.matchMedia("(prefers-reduced-motion: reduce)");
+ const qualityLevels=[1,.83,.69];
+ let w=0,h=0,last=-Infinity,previousTick=0,dead=false;
+ let qualityIndex=0,samples=0,slowFrames=0;
+ function restore(){
+  last=-Infinity;
+  lake.invalidate();
+ }
+ renderer.domElement.addEventListener("webglcontextrestored",restore);
+
+ function render(ctx,width,height,ms,peers,count,activeMeteors){
+  if(dead||renderer.getContext().isContextLost())return false;
+  const portrait=width<760,reduced=motion.matches;
+  const tick=ms-previousTick;
+  previousTick=ms;
+  if(tick>0&&tick<1000&&!document.hidden){
+   samples++;
+   if(tick>(portrait?46:36))slowFrames++;
+   if(samples>=28){
+    if(slowFrames>samples*.46&&qualityIndex<qualityLevels.length-1){
+     qualityIndex++;
+     setGrassQuality(1-qualityIndex*.36);
+     lake.invalidate();
+    }
+    samples=slowFrames=0;
+   }
+  }else{
+   samples=slowFrames=0;
+  }
+  const quality=qualityLevels[qualityIndex];
+  const scale=Math.min(portrait?1:1.16,Math.sqrt((portrait?545000:1210000)/Math.max(1,width*height)))*quality;
+  const nw=Math.max(1,Math.round(width*scale)),nh=Math.max(1,Math.round(height*scale));
+  if(nw!==w||nh!==h){
+   w=nw;h=nh;
+   renderer.setSize(w,h,false);
+   camera.aspect=width/height;
+   camera.updateProjectionMatrix();
+   last=-Infinity;
+  }
+  if(ms-last>=1000/(portrait?30:32)-.8){
+   const dt=Number.isFinite(last)?Math.min(.12,(ms-last)*.001):.033;
+   const t=reduced?0:ms*.001;
+   sky.material.uniforms.detail.value=qualityIndex===0?1:0;
+   stars.material.uniforms.time.value=t;
+   stars.material.uniforms.scale.value=Math.max(.83,scale);
+   lake.material.uniforms.time.value=t;
+   wind.value=t;
+   mist.material.uniforms.time.value=t;
+   tree.mat.emissiveIntensity=.21+Math.min(.96,count*.013)+.055*Math.sin(t*.8);
+   for(const [id,visitor] of people){
+    if(!peers.some(peer=>peer.id===id)){
+     scene.remove(visitor.root,visitor.shadow.mesh);
+     people.delete(id);
+     visitor.shadow.dispose();
+     visitor.dispose();
+    }
+   }
+   const close=peers.length>0;
+   const distance=close?(small?10.4:12.5):15;
+   const settle=reduced?1:Math.min(1,dt*3.2);
+   camera.position.z+=(distance-camera.position.z)*settle;
+   camera.position.y+=((close?3.77:4.31)-camera.position.y)*settle;
+   aimY+=((close?7.18:10.6)-aimY)*settle;
+   camera.lookAt(0,aimY,-48);
+   const span=2*(camera.position.z+3.0)*Math.tan(camera.fov*Math.PI/360)*camera.aspect;
+   const time=Date.now();
+   for(const p of peers){
+    let visitor=people.get(p.id);
+    if(!visitor){
+     visitor=createHuman(p.hue);
+     visitor.shadow=contactShadow(.75,.85,.58,heightAt);
+     people.set(p.id,visitor);
+     scene.add(visitor.root,visitor.shadow.mesh);
+    }
+    const x=(p.x-.5)*span*.98;
+    const z=-3.0-(portrait&&peers.length>4?(Math.round(p.x*100)%2)*.48:0);
+    visitor.root.position.set(x,heightAt(x,z)+.04,z);
+    visitor.root.scale.setScalar(portrait&&peers.length>5?.86:1.06);
+    const shadowSize=p.pose==="lie"?1.35:.95;
+    if(x!==visitor.shadow.x||z!==visitor.shadow.z||shadowSize!==visitor.shadow.size){
+     visitor.shadow.place(x,z,shadowSize);
+     Object.assign(visitor.shadow,{x,z,size:shadowSize});
+    }
+    visitor.update(p,t,time,dt,reduced);
+    if(p.pose==="lie")visitor.root.position.y+=.22;
+   }
+   lake.reflect(renderer,scene,camera,ms,quality,reduced);
+   meteors.update(activeMeteors,width,height);
+   renderer.render(scene,camera);
+   last=ms;
+  }
+  ctx.drawImage(renderer.domElement,0,0,width,height);
+  return true;
+ }
+
+ function dispose(){
+  if(dead)return;
+  dead=true;
+  renderer.domElement.removeEventListener("webglcontextrestored",restore);
+  lake.dispose();
+  for(const visitor of people.values()){
+   scene.remove(visitor.root,visitor.shadow.mesh);
+   visitor.shadow.dispose();
+   visitor.dispose();
+  }
+  people.clear();
+  const geometries=new Set(),materials=new Set();
+  scene.traverse(object=>{
+   if(!object.isMesh&&!object.isPoints)return;
+   if(object.isInstancedMesh)object.dispose();
+   if(object.geometry&&!object.geometry.userData.sharedHuman)geometries.add(object.geometry);
+   if(Array.isArray(object.material))object.material.forEach(material=>materials.add(material));
+   else materials.add(object.material);
+  });
+  geometries.forEach(geometry=>geometry.dispose());
+  materials.forEach(material=>material.dispose());
+  renderer.dispose();
+  renderer.forceContextLoss();
+ }
  return {render,dispose};
 }
