@@ -656,25 +656,34 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     resize();
 
     function spawnMeteor(t: number, bright = 1) {
-      // Keep a whole meteor in the portrait frame. A fireball travels farther,
-      // flares near the end and leaves a soft train after its head vanishes.
+      if (w < 1 || h < 1) return;
+      // Design the complete trajectory inside the upper sky before spawning.
+      // A conservative lower bound keeps head, halo and wake above the terrain.
       const fireball = bright > 1.16;
-      const x = w * (fireball ? .78 + random() * .17 : .38 + random() * .57);
-      const y = h * (.18 + random() * (fireball ? .30 : .43));
-      const speed = (w < 750 ? 188 : Math.min(490, Math.max(255, w * .36))) * (.85 + random() * .35) * (fireball ? 1.13 : 1) * .86;
-      const angle = .31 + random() * .41;
+      const portrait = w < 750;
+      const skyBottom = h * (portrait ? .31 : .285);
+      const skyTop = h * .075;
+      const pad = Math.min(24, w * .055);
+      const x = w * (.69 + random() * .24);
+      const y = skyTop + random() * Math.max(1, skyBottom - skyTop - h * .12);
+      const angle = .16 + random() * .22;
+      const flight = fireball ? 1.40 + random() * .30 : .95 + random() * .34;
+      const distance = Math.min(w * (fireball ? .54 : .37) * (.76 + random() * .24),
+        (x-pad)/Math.cos(angle),
+        Math.max(4,skyBottom-y-pad)/Math.sin(angle));
+      const speed = distance / flight;
       const tintRoll = random();
       const tint: MeteorTint = fireball
-        ? tintRoll < .58 ? "mint" : tintRoll < .88 ? "ice" : "amber"
-        : tintRoll < .87 ? "ice" : tintRoll < .97 ? "mint" : "amber";
+        ? tintRoll < .40 ? "mint" : tintRoll < .89 ? "ice" : "amber"
+        : tintRoll < .88 ? "ice" : tintRoll < .97 ? "mint" : "amber";
       meteors.push({
         x, y, vx: -speed * Math.cos(angle), vy: speed * Math.sin(angle),
         born: t,
-        length: Math.min(w * (fireball ? .54 : .38), (fireball ? 195 : 90) + random() * (fireball ? 115 : 105)),
-        wake: Math.min(w * (fireball ? .62 : .42), (fireball ? 225 : 115) + random() * 90),
-        flight: fireball ? 1.38 + random() * .26 : .90 + random() * .38,
-        trainLife: fireball ? 1.45 + random() * .65 : .28 + random() * .23,
-        bright, fireball, flareAt: .44 + random() * .28, tint,
+        length: Math.min(distance*.80, w * (fireball ? .28 : .18), fireball ? 210 : 132),
+        wake: Math.min(distance*.93,w*(fireball?.40:.25),fireball?290:160),
+        flight,
+        trainLife: fireball ? 1.2 + random() * .55 : .30 + random() * .28,
+        bright, fireball, flareAt: .43 + random() * .28, tint,
       });
     }
 
@@ -878,21 +887,22 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
         if (wakeLength > 5) {
           const afterFlight = Math.max(0, age - m.flight);
           const persistence = age < m.flight ? clamp(age / .40, 0, 1) : Math.pow(clamp(1 - afterFlight / m.trainLife, 0, 1), 1.65);
-          meteorCtx.globalAlpha = (m.fireball ? .65 : .26) * persistence * Math.min(1, m.bright);
-          const trainHeight = m.fireball ? 27 : 16;
+          meteorCtx.globalAlpha = (m.fireball ? .48 : .20) * persistence * Math.min(1, m.bright);
+          const trainHeight = m.fireball ? 21 : 11;
           meteorCtx.drawImage(meteorSprite(m.tint, true), -wakeLength, -trainHeight / 2, wakeLength, trainHeight);
         }
         if (age < m.flight) {
           const u = age / m.flight;
-          const inRamp = clamp(u / .13, 0, 1), outRamp = clamp((1 - u) / .17, 0, 1);
+          const enter=clamp(u/.15,0,1),leave=clamp((1-u)/.24,0,1);
+          const inRamp=enter*enter*(3-2*enter),outRamp=leave*leave*(3-2*leave);
           const flare = Math.exp(-Math.pow((u - m.flareAt) / (m.fireball ? .16 : .25), 2));
           meteorCtx.globalAlpha = clamp(m.bright * inRamp * outRamp * (.68 + (m.fireball ? .40 : .25) * flare), 0, 1);
-          const length = m.length * clamp(age / .23, 0, 1);
-          const height = m.fireball ? 23 : 17;
+          const length = Math.min(m.length, Math.hypot(m.vx,m.vy)*travelledFor) * clamp(age / .19, 0, 1);
+          const height = m.fireball ? 17 : 11;
           meteorCtx.drawImage(meteorSprite(m.tint), -length, -height / 2, length, height);
           // Keep the star-white point visible at its actual screen size,
           // independent of the tapered streak's stretched sprite texture.
-          const headSize = m.fireball ? 37 : 24;
+          const headSize = m.fireball ? 29 : 17;
           meteorCtx.globalAlpha = clamp(m.bright * inRamp * outRamp * (.76 + (m.fireball ? .45 : .18) * flare), 0, 1);
           meteorCtx.drawImage(meteorHeadSprite(m.tint), -headSize / 2, -headSize / 2, headSize, headSize);
         }
