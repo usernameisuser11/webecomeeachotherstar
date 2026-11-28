@@ -179,59 +179,91 @@ function mountainHeight(seed,center,amp,spread){
  };
 }
 function makeSky(){
-  const geo=new T.SphereGeometry(340,32,20);
-  const mat=new T.ShaderMaterial({side:T.BackSide,depthWrite:false,uniforms:{time:{value:0}},vertexShader:`
-    varying vec3 dir;
-    void main(){dir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
-  `,fragmentShader:`
-    precision highp float;
-    varying vec3 dir;uniform float time;
-    float h(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
-    float n(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-      return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
-      mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z);}
-    float fb(vec3 p){float v=0.,a=.53;for(int i=0;i<5;i++){v+=a*n(p);p=p*2.03+vec3(11.4,7.2,5.1);a*=.48;}return v;}
-    void main(){
-      vec3 d=normalize(dir);float alt=max(0.,d.y);
-      vec3 col=mix(vec3(.105,.127,.245),vec3(.007,.015,.051),smoothstep(0.,.64,alt));
-      float warm=pow(max(0.,1.-abs(d.y+.03)*5.),2.)*pow(max(0.,d.x*.5+.5),2.);
-      col+=vec3(.14,.056,.045)*warm;
-      vec3 normal=normalize(vec3(.62,.32,.39));float band=dot(d,normal);
-      float twist=(fb(d*11.)-.5)*.14;
-      float core=exp(-pow((band+twist)*8.5,2.));
-      float veil=exp(-pow((band+twist)*3.6,2.));
-      float neb=fb(d*24.+vec3(0,1,5));
-      float dust=smoothstep(.37,.78,fb(d*57.+4.));
-      col+=veil*vec3(.025,.043,.105)*(neb+.25);
-      col+=core*vec3(.16,.105,.24)*(.15+neb*1.35)*(1.-dust*.86);
-      col+=core*vec3(.11,.115,.18)*pow(max(0.,neb),2.);
-      float horizon=exp(-abs(d.y+.025)*10.);
-      col+=vec3(.04,.054,.081)*horizon;
-      gl_FragColor=vec4(col,1.);
-      #include <colorspace_fragment>
-    }
-  `});
-  const m=new T.Mesh(geo,mat);m.renderOrder=-100;return m;
+ const geo=new T.SphereGeometry(340,48,32);
+ const mat=new T.ShaderMaterial({side:T.BackSide,depthWrite:false,toneMapped:false,uniforms:{time:{value:0}},vertexShader:`
+ varying vec3 dir;void main(){dir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
+ `,fragmentShader:`
+ precision highp float;
+ varying vec3 dir;uniform float time;
+ // Stable high precision hash and quintic interpolation, with rotation
+ // between octaves so the nebula has no axis-aligned block boundaries.
+ float h(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
+ float n(vec3 p){
+  vec3 i=floor(p),f=fract(p);f=f*f*f*(f*(f*6.-15.)+10.);
+  return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z);
+ }
+ float fb(vec3 p){
+  float v=0.,a=.54;
+  mat3 rot=mat3(.00,.80,.60,-.80,.36,-.48,-.60,-.48,.64);
+  for(int i=0;i<5;i++){v+=a*n(p);p=rot*p*2.04+vec3(13.7,7.1,5.2);a*=.49;}
+  return v;
+ }
+ void main(){
+  vec3 d=normalize(dir);float alt=max(0.,d.y);
+  vec3 col=mix(vec3(.061,.084,.157),vec3(.003,.008,.029),smoothstep(0.,.61,alt));
+  float horizon=exp(-abs(d.y+.02)*10.);
+  col+=vec3(.031,.036,.060)*horizon;
+  vec3 plane=normalize(vec3(.62,.32,.39));
+  vec3 warp=vec3(fb(d*7.+3.),fb(d*7.+17.),fb(d*7.+31.))-.5;
+  vec3 q=d+warp*.075;
+  float band=dot(q,plane);
+  float core=exp(-pow(band*10.5,2.));
+  float veil=exp(-pow(band*4.4,2.));
+  float cloud=fb(q*25.+vec3(0.,1.,5.));
+  float wisps=fb(q*54.+vec3(8.,3.,2.));
+  float dust=fb(q*37.+vec3(3.,9.,15.));
+  float lane=smoothstep(.39,.68,dust+.09*(wisps-.5));
+  float light=pow(clamp(cloud*.85+wisps*.25,0.,1.),1.7)*(1.-.76*lane);
+  vec3 cool=vec3(.062,.102,.194),violet=vec3(.145,.084,.212),rose=vec3(.20,.123,.19);
+  vec3 spectrum=mix(cool,violet,smoothstep(.27,.72,cloud));
+  spectrum=mix(spectrum,rose,smoothstep(.57,.85,wisps)*.45);
+  col+=veil*vec3(.022,.033,.077)*(.24+.76*cloud);
+  col+=core*spectrum*(.19+1.85*light);
+  col+=core*vec3(.115,.136,.194)*pow(light,2.)*.85;
+  // Fine dither below a display step, stable in screen space.
+  col+=(h(vec3(gl_FragCoord.xy,0.))-.5)*.00065;
+  gl_FragColor=vec4(max(col,vec3(0.)),1.);
+  #include <colorspace_fragment>
+ }
+ `});
+ const mesh=new T.Mesh(geo,mat);mesh.renderOrder=-100;return mesh;
 }
 function makeStars(rand){
-  const p=[],sizes=[],phases=[],colors=[],a=new T.Color("#b8d7ff"),b=new T.Color("#fff0d2");
-  for(let i=0;i<7800;i++){
-    let x,y,z;
-    if(i<4700){x=(rand()-.5)*2;y=rand()*.9+.025;z=-.22-rand()*1.5;}
-    else {x=(rand()-.5)*1.8;y=rand()*.76;z=-(.55+rand());y=clamp(y+(.22-x*.34),.02,.96);}
-    const v=new T.Vector3(x,y,z).normalize().multiplyScalar(270);
-    p.push(v.x,v.y,v.z);sizes.push(.65+Math.pow(rand(),6)*2.15);phases.push(rand()*TAU);
-    const c=a.clone().lerp(b,Math.pow(rand(),2));colors.push(c.r,c.g,c.b);
+ const p=[],sizes=[],phases=[],colors=[],strengths=[];
+ const palette=["#c9dfff","#e3ebff","#ffffff","#fff0d3","#decaff"].map(v=>new T.Color(v));
+ const starRand=random(83921);
+ for(let i=0;i<11500;i++){
+  let x,y,z;
+  if(i<6500){x=(starRand()-.5)*2.3;y=starRand()*.98+.02;z=-.23-starRand()*1.5;}
+  else{
+   // Galactic dust band: sample the same inclined plane as the nebula.
+   x=(starRand()-.5)*2.1;z=-.55-starRand()*.95;
+   y=clamp((-.62*x-.39*z)/.32+(starRand()-.5)*.48,.03,1.3);
   }
-  const geo=new T.BufferGeometry();geo.setAttribute("position",new T.Float32BufferAttribute(p,3));geo.setAttribute("size",new T.Float32BufferAttribute(sizes,1));geo.setAttribute("phase",new T.Float32BufferAttribute(phases,1));geo.setAttribute("color",new T.Float32BufferAttribute(colors,3));
-  const material=new T.ShaderMaterial({transparent:true,depthWrite:false,blending:T.AdditiveBlending,uniforms:{time:{value:0},scale:{value:1}},vertexShader:`
-    attribute float size,phase;attribute vec3 color;varying vec3 tint;varying float ph;
-    uniform float scale;void main(){tint=color;ph=phase;gl_PointSize=size*scale;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
-  `,fragmentShader:`
-    varying vec3 tint;varying float ph;uniform float time;
-    void main(){float r=length(gl_PointCoord-.5)*2.;float a=pow(max(0.,1.-r),1.8)*(.57+.36*sin(time*.75+ph));gl_FragColor=vec4(tint,a);}
-  `});
-  return new T.Points(geo,material);
+  const v=new T.Vector3(x,y,z).normalize().multiplyScalar(270);
+  p.push(v.x,v.y,v.z);
+  const power=Math.pow(starRand(),5.6);
+  sizes.push(.62+power*3.4);strengths.push(.25+.75*Math.pow(starRand(),.65));phases.push(starRand()*TAU);
+  const c=palette[Math.floor(starRand()*palette.length)];colors.push(c.r,c.g,c.b);
+ }
+ const geo=new T.BufferGeometry();
+ geo.setAttribute("position",new T.Float32BufferAttribute(p,3));geo.setAttribute("size",new T.Float32BufferAttribute(sizes,1));geo.setAttribute("phase",new T.Float32BufferAttribute(phases,1));geo.setAttribute("color",new T.Float32BufferAttribute(colors,3));geo.setAttribute("strength",new T.Float32BufferAttribute(strengths,1));
+ const material=new T.ShaderMaterial({transparent:true,depthWrite:false,toneMapped:false,blending:T.AdditiveBlending,uniforms:{time:{value:0},scale:{value:1}},vertexShader:`
+ attribute float size,phase,strength;attribute vec3 color;varying vec3 tint;varying float ph,lum;
+ uniform float scale;
+ void main(){tint=color;ph=phase;lum=strength;gl_PointSize=max(1.,size*scale);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}
+ `,fragmentShader:`
+ varying vec3 tint;varying float ph,lum;uniform float time;
+ void main(){
+  float r=length(gl_PointCoord-.5)*2.;
+  float core=exp(-r*r*11.);float halo=exp(-r*r*3.4)*.22;
+  float shimmer=.83+.17*sin(time*(.48+.28*sin(ph))+ph);
+  float alpha=(core+halo)*(1.-smoothstep(.74,1.,r))*lum*shimmer;
+  gl_FragColor=vec4(tint,alpha);
+ }
+ `});
+ return new T.Points(geo,material);
 }
 // Live planar reflection. Only the distant landscape is drawn into this small
 // render target; it is regenerated on the GPU, never loaded from an image.
