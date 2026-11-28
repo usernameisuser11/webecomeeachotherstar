@@ -583,49 +583,91 @@ function branchMesh(data){
  return new T.Mesh(g,new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}));
 }
 function curveOf(a,b,c){return new T.CatmullRomCurve3([a,b,c]);}
+// Conifers: irregular, layered crowns made of real branch and needle meshes.
+// Keep the separate memory tree untouched.
 function makeWoodland(scene,rand,small){
  const r=random(839127),data={p:[],c:[],i:[]},foliage=[],o=new T.Object3D(),Y=new T.Vector3(0,1,0);
- const bark=new T.Color("#48403c"),greens=["#294a43","#365a4d","#446754","#58755d"].map(v=>new T.Color(v));
- const n=small?16:31;
- for(let k=0;k<n;k++){
-  const side=k%2?1:-1,x=side*(5.7+Math.pow(r(),1.2)*24),z=-10-r()*10.5;
+ const bark=new T.Color("#51463d"),dark=new T.Color("#244630"),light=new T.Color("#64894c");
+ const treeCount=small?16:31;
+ function addSpray(base,dir,width,length,depth,tone){
+  o.position.copy(base);
+  o.quaternion.setFromUnitVectors(Y,dir.clone().normalize());
+  o.rotateY((r()-.5)*.35);
+  o.scale.set(width,length,depth);o.updateMatrix();
+  foliage.push([o.matrix.clone(),dark.clone().lerp(light,tone)]);
+ }
+ for(let k=0;k<treeCount;k++){
+  const side=k%2?1:-1,x=side*(6.5+Math.pow(r(),1.25)*23),z=-10.0-r()*7.8;
   const y=ground(x,z);if(y<-.8)continue;
-  const height=1.8+Math.pow(r(),1.6)*3.4,lean=(r()-.5)*height*.12;
-  const a=new T.Vector3(x,y,z),b=new T.Vector3(x+lean*.4,y+height*.46,z+.12),c=new T.Vector3(x+lean,y+height,z+(r()-.5)*.28);
-  const trunk=curveOf(a,b,c);
-  addBranch(data,trunk,.045+height*.021,.012,11,8,bark,k);
-  const rings=6+Math.floor(r()*4);
-  for(let j=0;j<rings;j++){
-   const t=.24+j/(rings-1)*.68,center=trunk.getPointAt(t),length=height*(.255*Math.pow(1-t,.75)+.015);
-   const count=3+Math.floor(r()*3);
-   for(let q=0;q<count;q++){
-    const angle=q*TAU/count+j*2.39996+r()*.68;
-    const dx=Math.cos(angle),dz=Math.sin(angle),L=length*(.7+r()*.52);
-    const middle=center.clone().add(new T.Vector3(dx*L*.54,-L*.17,dz*L*.54));
-    const end=center.clone().add(new T.Vector3(dx*L,L*(.02+r()*.15),dz*L));
-    const limb=curveOf(center,middle,end);addBranch(data,limb,.012+L*.023,.003,5,5,bark,j+q);
-    for(let m=0;m<4;m++){
-     const base=limb.getPointAt(.35+m*.17);
-     const dir=new T.Vector3(dx+(-1)**m*dz*.6,.32+r()*.37,dz-(-1)**m*dx*.6).normalize();
-     o.position.copy(base);o.quaternion.setFromUnitVectors(Y,dir);o.scale.set(L*.64,L*.74,L*.64);o.updateMatrix();
-     foliage.push([o.matrix.clone(),greens[Math.floor(r()*greens.length)]]);
+  const h=2.1+Math.pow(r(),1.35)*3.15,lean=(r()-.5)*h*.12,leanZ=(r()-.5)*h*.075;
+  const base=new T.Vector3(x,y-.04,z),mid=new T.Vector3(x+lean*.35,y+h*.44,z+leanZ*.5),tip=new T.Vector3(x+lean,y+h,z+leanZ);
+  const trunk=curveOf(base,mid,tip);
+  const trunkR=h*(.028+r()*.008);
+  addBranch(data,trunk,trunkR,.008,16,9,bark,k);
+  // Lower boughs are wide; higher boughs grow shorter. Each tree has a
+  // different outline, branch angle, empty gaps and height.
+  const levels=9+Math.floor(r()*4),start=.18+r()*.10,rotation=r()*TAU;
+  const breadth=.23+r()*.105;
+  for(let j=0;j<levels;j++){
+   const t=start+(j/(levels-1))*(.94-start);
+   const center=trunk.getPointAt(t);
+   const envelope=Math.pow(Math.max(.03,1-t),.75);
+   const L=h*breadth*envelope*(.85+r()*.30);
+   const branchCount=j<levels-3?5+Math.floor(r()*2):3+Math.floor(r()*2);
+   for(let q=0;q<branchCount;q++){
+    const angle=rotation+j*2.399963+q*TAU/branchCount+(r()-.5)*.48;
+    const dx=Math.cos(angle),dz=Math.sin(angle),len=L*(.70+r()*.55);
+    const down=len*(.14+r()*.13)*(1-t);
+    const m=center.clone().add(new T.Vector3(dx*len*.48,-down,dz*len*.48));
+    const e=center.clone().add(new T.Vector3(dx*len,len*(.09+r()*.19)-down*.5,dz*len));
+    const limb=curveOf(center,m,e);
+    addBranch(data,limb,Math.max(.009,trunkR*.30*(1-t)),.0025,5,5,bark,j+q);
+    // Paired secondary shoots overlap into a full, uneven bough rather
+    // than exposing a bare branch with isolated tufts at the ends.
+    const n=small?4:5;
+    for(let m=0;m<n;m++){
+     const u=.20+(m/(n-1))*.76,point=limb.getPointAt(u);
+     const size=len*(.22+.20*Math.sin(Math.PI*u))*(.88+r()*.23);
+     for(const sign of [-1,1]){
+      const a2=angle+sign*(.59+r()*.38);
+      const dir=new T.Vector3(Math.cos(a2),.20+r()*.22,Math.sin(a2));
+      addSpray(point,dir,size*.66,size*1.32,size*.55,.20+.42*r()+.18*t);
+     }
     }
+    addSpray(limb.getPointAt(.84),new T.Vector3(dx,.36,dz),len*.24,len*.56,len*.22,.40+.30*r());
    }
+  }
+  // Close the tip without using a cone mesh.
+  for(let j=0;j<6;j++){
+   const angle=j*2.399963+rotation,point=trunk.getPointAt(.88+j*.019);
+   addSpray(point,new T.Vector3(Math.cos(angle)*.27,1,Math.sin(angle)*.27),h*.045,h*.09,h*.042,.48+.25*r());
   }
  }
  scene.add(branchMesh(data));
- // Real curved needles, distributed along individual shoots, never image cards.
- const p=[],idx=[];
- for(let i=0;i<30;i++){
-  const a=i*2.399963,dy=.06+i/30*.78,dx=Math.cos(a),dz=Math.sin(a);
-  const len=(.29+.22*r())*(1-.43*dy),w=.013+r()*.009,bx=-dz*w,bz=dx*w;
-  const b=p.length/3;
-  p.push(-bx,dy,-bz,bx,dy,bz,dx*len*.5+bx*.6,dy+len*.21,dz*len*.5+bz*.6,dx*len,dy+len*.36,dz*len,dx*len*.5-bx*.6,dy+len*.21,dz*len*.5-bz*.6);
-  idx.push(b,b+1,b+2,b,b+2,b+4,b+4,b+2,b+3);
+ // Reusable volumetric needle sprays: tapered folded needle pairs along
+ // a gently curved shoot. Actual mesh geometry, no billboard or texture.
+ const p=[],idx=[],colors=[],rr=random(64127),needles=small?34:48;
+ for(let i=0;i<needles;i++){
+  const t=.05+.91*i/(needles-1),angle=i*2.399963+(rr()-.5)*.65;
+  const radius=.46*Math.pow(1-t,.72)*(.76+rr()*.37),len=.20+radius;
+  const dx=Math.cos(angle),dz=Math.sin(angle),bx=-dz,bz=dx;
+  const x=.075*t*t,z=.045*t*t,y=t;
+  const width=(.027+rr()*.022)*Math.pow(1-t,.23),k=p.length/3;
+  p.push(x,y,z,x+dx*radius*.46+bx*width,y+len*.13,z+dz*radius*.46+bz*width,
+   x+dx*radius,y+len*.42,z+dz*radius,
+   x+dx*radius*.46-bx*width,y+len*.13,z+dz*radius*.46-bz*width,
+   x+dx*radius*.46,y+len*.17,z+dz*radius*.46);
+  idx.push(k,k+1,k+4,k+1,k+2,k+4,k+2,k+3,k+4,k+3,k,k+4);
+  const tint=.78+rr()*.21;
+  for(const s of [.62,tint,1.12*tint,tint,.95*tint])colors.push(s*.96,s,s*.93);
  }
- const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setIndex(idx);g.computeVertexNormals();
- const mesh=new T.InstancedMesh(g,new T.MeshStandardMaterial({color:"#ffffff",side:T.DoubleSide,roughness:.96}),foliage.length);
+ const g=new T.BufferGeometry();g.setAttribute("position",new T.Float32BufferAttribute(p,3));g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.setIndex(idx);g.computeVertexNormals();
+ // Standard instancing path, with restrained green fill so the needles
+ // remain visible under the cool night lighting.
+ const m=new T.MeshStandardMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,roughness:1,emissive:"#25432b",emissiveIntensity:.35});
+ const mesh=new T.InstancedMesh(g,m,foliage.length);
  foliage.forEach(([matrix,color],i)=>{mesh.setMatrixAt(i,matrix);mesh.setColorAt(i,color);});
+ mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;mesh.computeBoundingSphere();
  scene.add(mesh);
 }
 function makeMemoryTree(scene,rand,small){
