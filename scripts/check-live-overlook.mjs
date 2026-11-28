@@ -86,7 +86,7 @@ async function seedSky() {
   const alice = "test_a_" + crypto.randomUUID();
   const bob = "test_b_" + crypto.randomUUID();
   const a = await post("/api/sky", { action: "create", token: alice, name: "강가의 테스트별", x: .29, y: .32, hue: 187 });
-  const b = await post("/api/sky", { action: "create", token: bob, name: "연결된 테스트별", x: .43, y: .23, hue: 255 });
+  const b = await post("/api/sky", { action: "create", token: bob, name: "연결된 테스트별", x: .43, y: .23, hue: 263 });
   assert.notEqual(a.id, b.id);
   const result = await post("/api/rooms", { action: "create", token: alice, name: "달빛 검증방", visibility: "public", theme: "forest" });
   const rooms = await (await fetch(new URL("/api/rooms", base))).json();

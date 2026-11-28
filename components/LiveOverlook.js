@@ -836,7 +836,7 @@ export function createLiveOverlook(){
  moonlight.position.set(-28,19,-30);
  const rim=new T.DirectionalLight("#d9bfdf",.50);
  rim.position.set(35,8,-40);
- const sky=makeSky(),stars=makeStars(random(83921),small);
+ const sky=makeSky(small),stars=makeStars(random(83921),small);
  const ranges=[
   meshTerrain(240,112,small?146:180,-142,mountainHeight(11,-143,42,29),"#263953","#8496be"),
   meshTerrain(200,90,small?124:156,-99,mountainHeight(47,-99,30,23),"#21354e","#56758e"),

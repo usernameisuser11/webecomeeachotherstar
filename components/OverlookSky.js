@@ -1,8 +1,10 @@
 import * as T from "three";
 
-const galaxyPlane=new T.Vector3(.62,.34,.32).normalize();
+const wideGalaxyPlane=new T.Vector3(.62,.34,.32).normalize();
+const portraitGalaxyPlane=new T.Vector3(.62,.37,.218).normalize();
 
-export function makeSky(){
+export function makeSky(small){
+ const galaxyPlane=small?portraitGalaxyPlane:wideGalaxyPlane;
  const material=new T.ShaderMaterial({
   side:T.BackSide,depthWrite:false,toneMapped:false,
   uniforms:{galaxyPlane:{value:galaxyPlane},detail:{value:1}},
@@ -75,6 +77,7 @@ export function makeSky(){
 }
 
 export function makeStars(random,small){
+ const galaxyPlane=small?portraitGalaxyPlane:wideGalaxyPlane;
  const positions=[],sizes=[],phases=[],colors=[],strengths=[];
  const palette=["#b8d6ff","#d9e7ff","#fff9ee","#ffe0b7","#d5bbff"].map(hex=>new T.Color(hex));
  const point=new T.Vector3(),count=small?7900:10500;

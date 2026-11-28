@@ -927,7 +927,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
   return <><canvas
     ref={canvasRef}
     className={`sky-canvas ${placing ? 'placing' : ''}`}
-    aria-label="별빛과 은하수, 산과 호수가 펼쳐진 밤하늘. 자신의 별과 다른 친구의 별을 선택할 수 있습니다."
+    aria-label="별빛과 은하수, 산과 강이 펼쳐진 밤하늘. 자신의 별과 다른 친구의 별을 선택할 수 있습니다."
     onPointerUp={(e) => {
       const rect = e.currentTarget.getBoundingClientRect();
       const x = (e.clientX - rect.left) / rect.width;
