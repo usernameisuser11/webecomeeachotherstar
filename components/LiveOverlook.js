@@ -325,11 +325,11 @@ function riverGeometry(small){
 }
 function makeLake(small){
  const level=WATER_LEVEL;
- const target=new T.WebGLRenderTarget(small?320:600,small?320:420,{minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true});
+ const target=new T.WebGLRenderTarget(small?360:720,small?360:480,{minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true});
  const mirror=new T.PerspectiveCamera(),projection=new T.Matrix4(),direction=new T.Vector3(),focus=new T.Vector3();
  mirror.layers.set(1);
  const uniforms={time:{value:0},reflection:{value:target.texture},reflectionMatrix:{value:projection},reflectionReady:{value:0},riverFog:{value:fogColor}};
- const mat=new T.ShaderMaterial({side:T.DoubleSide,uniforms,vertexShader:`
+ const mat=new T.ShaderMaterial({side:T.DoubleSide,toneMapped:false,uniforms,vertexShader:`
   attribute float waterDepth;varying float depthFade;varying vec3 world;varying vec4 reflected;uniform mat4 reflectionMatrix;uniform float time;
   void main(){
    vec3 p=position;depthFade=waterDepth;
@@ -352,31 +352,44 @@ function makeLake(small){
    float deep=smoothstep(.035,.95,depthFade);
    vec3 v=normalize(cameraPosition-world);
    vec3 surfaceNormal=normalize(vec3(-slope.x*.013,1.,-slope.y*.008));
-   float fresnel=.14+.64*pow(1.-clamp(dot(v,surfaceNormal),0.,1.),3.7);
+   float fresnel=.06+.86*pow(1.-clamp(dot(v,surfaceNormal),0.,1.),4.2);
    vec2 uv=reflected.xy/max(.0001,reflected.w)*.5+.5;
-   uv+=vec2(slope.x*.0017,slope.y*.0014)*deep;
+   uv+=vec2(slope.x*.0016,slope.y*.0048)*deep;
    float inside=step(.001,uv.x)*step(uv.x,.999)*step(.001,uv.y)*step(uv.y,.999)*step(.0001,reflected.w);
    vec2 sampleUV=clamp(uv,vec2(.005),vec2(.995));
    vec3 refl=texture2D(reflection,sampleUV).rgb*.62;
    refl+=texture2D(reflection,sampleUV+vec2(.0018,.0023)).rgb*.19;
    refl+=texture2D(reflection,sampleUV-vec2(.0018,.0023)).rgb*.19;
-   vec3 shallow=vec3(.020,.035,.030),deepColor=vec3(.008,.022,.030);
+   // At this grazing camera angle, the old blue haze overpowered every
+   // detail. Keep the reflected luminance but restrain blue chroma.
+   float reflLum=dot(refl,vec3(.2126,.7152,.0722));
+   vec3 reflectionColor=mix(vec3(reflLum),refl,.38)*vec3(.73,.89,.88);
+   reflectionColor=min(reflectionColor,vec3(.16,.21,.22));
+   vec3 shallow=vec3(.028,.041,.028),deepColor=vec3(.010,.025,.028);
    vec3 base=mix(shallow,deepColor,deep);
-   float reflectionMix=fresnel*reflectionReady*inside*(.29+.51*deep);
-   vec3 color=mix(base,refl*vec3(.66,.77,.83),reflectionMix);
-   float glint=pow(max(0.,a*.48+b*.34+c*.18),21.);
-   float patch=.55+.45*sin(flow*.094+p.y*.16+1.6*drift);
-   color+=vec3(.061,.087,.108)*glint*patch*deep*(.30+.70*fresnel);
-   float ripple=pow(max(0.,sin(flow*.39+p.y*5.2+1.3*sin(flow*.23))),17.);
-   color+=vec3(.012,.024,.030)*ripple*deep*(.4+.6*patch);
-   float shoreline=exp(-pow((depthFade-.075)*17.,2.));
-   float brokenEdge=smoothstep(.0,.8,.5+.5*sin(p.x*1.7+sin(p.x*.42+p.y)*2.6));
-   color+=vec3(.009,.014,.013)*shoreline*brokenEdge*(.65+.35*a);
-   // Match distant water to the same atmosphere as the adjacent terrain.
-   float dist=length(cameraPosition-world),haze=1.-exp(-dist*dist*.000081);
-   color=mix(color,riverFog,haze*.29);
+   float reflectionMix=fresnel*reflectionReady*inside*mix(.26,.66,deep);
+   vec3 color=mix(base,reflectionColor,reflectionMix);
+   // Layer elongated, softly filtered ripples along the river rather than
+   // isolated glitter or a uniform saturated strip.
+   float wave1=p.y*2.65+sin(flow*.16)*1.25+time*.30;
+   float wave2=p.y*4.9-flow*.065+sin(flow*.31)*.70-time*.44;
+   float wave3=p.y*1.18+sin(flow*.105+.4)*1.1+time*.16;
+   float ridges=.5+.5*sin(wave1);
+   float detail=.5+.5*sin(wave2);
+   float filter1=1.-smoothstep(.9,3.1,fwidth(wave1));
+   float filter2=1.-smoothstep(.8,2.8,fwidth(wave2));
+   float broken=.35+.65*(.5+.5*sin(flow*.37+sin(p.y*.7)));
+   color*=.90+.17*(.5+.5*sin(wave3))+.12*(ridges-.5)*filter1;
+   color+=vec3(.025,.038,.038)*smoothstep(.66,.97,ridges)*filter1*broken*(.40+.60*fresnel);
+   color+=vec3(.012,.023,.024)*smoothstep(.78,.98,detail)*filter2*broken*deep;
+   // A narrow damp olive/grey shore grading into dark water, not bright blue.
+   float edge=1.-smoothstep(.025,.34,depthFade);
+   float edgeBreak=.65+.35*sin(p.x*1.23+sin(p.x*.36+p.y)*1.8);
+   color=mix(color,vec3(.039,.049,.033),edge*.48);
+   color+=vec3(.008,.012,.010)*exp(-pow((depthFade-.11)*12.,2.))*edgeBreak;
+   float dist=length(cameraPosition-world),haze=1.-exp(-dist*dist*.000045);
+   color=mix(color,vec3(.030,.044,.048),haze*.17);
    gl_FragColor=vec4(color,1.);
-   #include <tonemapping_fragment>
    #include <colorspace_fragment>
   }`});
  const mesh=new T.Mesh(riverGeometry(small),mat);
@@ -387,7 +400,7 @@ function makeLake(small){
   const moved=lastCamera.distanceToSquared(camera.position)>.015||lastDirection.distanceToSquared(direction)>.00004;
   if(ms-last<(moved?110:420)&&Math.abs(camera.aspect-lastAspect)<.01)return;
   last=ms;lastAspect=camera.aspect;lastCamera.copy(camera.position);lastDirection.copy(direction);
-  const width=small?320:600,height=Math.max(140,Math.min(small?520:580,Math.round(width/camera.aspect)));
+  const width=small?360:720,height=Math.max(160,Math.min(small?520:620,Math.round(width/camera.aspect)));
   if(target.width!==width||target.height!==height)target.setSize(width,height);
   mirror.position.copy(camera.position);mirror.position.y=2*level-camera.position.y;
   direction.y=-direction.y;mirror.up.set(0,-1,0);
