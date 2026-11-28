@@ -589,7 +589,16 @@ function makeWoodland(scene,rand,small){
  const bark=new T.Color("#594b40"),dark=new T.Color("#34583b"),light=new T.Color("#72955d");
  // A few deciduous trees frame the clearing, with the memory tree remaining
  // the distinctive foreground specimen. No evenly spaced avenue or conical crowns.
- const sites=[[-12.6,-13.8,3.5],[11.9,-14.2,3.4],[19.3,-11.9,4.5],[-21.7,-15.1,4.4],[-26.5,-10.8,5.0],[27.8,-15.0,4.0],[7.8,-16.2,2.2],[-4.8,-16.5,2.0],[-16.8,-17.1,2.7],[16.1,-17.0,2.8]];
+ const sites=small?[
+  [-10.7,-12.8,3.5],[5.2,-11.8,3.4],[10.5,-9.9,4.5],
+  [-17.6,-15.0,4.4],[-23.0,-11.2,5.0],[18.7,-15.0,4.0],
+  [8.5,-13.0,2.2]
+ ]:[
+  [-15.4,-12.8,3.5],[10.7,-12.9,3.4],[19.8,-9.9,4.5],
+  [-21.1,-13.1,4.4],[-26.3,-11.2,5.0],[27.3,-15.0,4.0],
+  [6.1,-13.2,2.2],[-4.8,-16.5,2.0],[-18.2,-14.0,2.7],
+  [15.6,-16.2,2.8]
+ ];
  const memoryX=small?-3.8:-7.8;
  function makeTree(x,z,height,seed){
   const y=ground(x,z);if(y<-.65||Math.hypot(x-memoryX,z+10.8)<4.3)return;
