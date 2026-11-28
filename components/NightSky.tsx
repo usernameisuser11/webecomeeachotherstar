@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { drawMemoryTree } from "./MemoryTree";
 import type { LiveOverlook, LivePeer } from "./LiveOverlook";
 
@@ -439,6 +439,7 @@ function landscape(ctx: CanvasRenderingContext2D, w: number, h: number, t: numbe
 }
 
 export default function NightSky({ stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, theme, canvasRef, meteorCanvasRef, livePeers, onLiveReady, onSpot, onSelectStar }: Props) {
+  const [sceneStatus, setSceneStatus] = useState<"loading" | "ready" | "fallback">(theme === "forest" ? "loading" : "ready");
   const refs = useRef({ stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar });
   useEffect(() => { refs.current = { stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar }; }, [stars, glows, specialLink, liveStarIds, myStarId, selectedId, placing, showerKey, showConstellations, showStarNames, intro, onSpot, onSelectStar]);
   const local = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -456,10 +457,29 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     let backdrop: HTMLCanvasElement | null = null;
     let liveWorld: LiveOverlook | null = null;
     let liveReady = false;
+    // On the forest scene, never paint the legacy terrain while WebGL starts.
+    let loading = theme === "forest";
+    let failed = false;
+    let published = false;
+    let loadTimer: number | undefined;
     onLiveReady(false);
-    if (theme === "forest") void import("./LiveOverlook").then(({createLiveOverlook}) => {
-      if (!destroyed) { try { liveWorld = createLiveOverlook(); } catch (err) { console.warn("3D observatory unavailable", err); } }
-    }).catch(err => console.warn("3D module unavailable", err));
+    setSceneStatus(loading ? "loading" : "ready");
+    const fallback = (reason: unknown) => {
+      if (destroyed || failed) return;
+      console.warn("3D observatory unavailable", reason);
+      failed = true; loading = false; published = false;
+      if (loadTimer !== undefined) window.clearTimeout(loadTimer);
+      liveWorld?.dispose(); liveWorld = null;
+      onLiveReady(false); liveReady = false;
+    };
+    if (loading) {
+      loadTimer = window.setTimeout(() => fallback("3D initialization timed out"), 15000);
+      void import("./LiveOverlook").then(({ createLiveOverlook }) => {
+        if (destroyed || failed) return;
+        try { liveWorld = createLiveOverlook(); }
+        catch (err) { fallback(err); }
+      }).catch(fallback);
+    }
     let terrainLayer: HTMLCanvasElement | null = null;
     let treeLayer: HTMLCanvasElement | null = null;
     let treeCtx: CanvasRenderingContext2D | null = null;
@@ -591,6 +611,21 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       sharedStarLayers = layers;
     }
 
+    function prepareFallback() {
+      if (!canvas || !ctx || backdrop || !w || !h) return;
+      backdrop = createBackdrop(w, h, theme);
+      terrainLayer = document.createElement("canvas");
+      terrainLayer.width = canvas.width;
+      terrainLayer.height = canvas.height;
+      const terrainCtx = terrainLayer.getContext("2d");
+      if (terrainCtx) { terrainCtx.setTransform(dpr, 0, 0, dpr, 0, 0); landscape(terrainCtx, w, h, 0, theme); }
+      treeLayer = document.createElement("canvas");
+      treeLayer.width = canvas.width;
+      treeLayer.height = canvas.height;
+      treeCtx = treeLayer.getContext("2d", { alpha: true });
+      treeCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+      lastTreePaint = -Infinity;
+    }
     function resize() {
       if (!canvas || !ctx) return;
       w = canvas.clientWidth; h = canvas.clientHeight;
@@ -608,18 +643,8 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       meteorCtx.setTransform(meteorDpr, 0, 0, meteorDpr, 0, 0);
       meteorLayerClear = true;
       local.current = { w, h };
-      backdrop = createBackdrop(w, h, theme);
-      terrainLayer = document.createElement("canvas");
-      terrainLayer.width = canvas.width;
-      terrainLayer.height = canvas.height;
-      const terrainCtx = terrainLayer.getContext("2d");
-      if (terrainCtx) { terrainCtx.setTransform(dpr, 0, 0, dpr, 0, 0); landscape(terrainCtx, w, h, 0, theme); }
-      treeLayer = document.createElement("canvas");
-      treeLayer.width = canvas.width;
-      treeLayer.height = canvas.height;
-      treeCtx = treeLayer.getContext("2d", { alpha: true });
-      treeCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
-      lastTreePaint = -Infinity;
+      backdrop = null; terrainLayer = null; treeLayer = null; treeCtx = null;
+      if (!loading && !liveWorld) prepareFallback();
       ambientLayers = createAmbientLayers(w, h, dpr);
       drawnSky = null;
       layerPeople = null;
@@ -664,7 +689,24 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       const t = (now - timeZero) / 1000;
       ctx.clearRect(0, 0, w, h);
       let rendered3d = false;
-      if (liveWorld) { try { rendered3d = liveWorld.render(ctx, w, h, now, livePeers.current, refs.current.stars.length); } catch (err) { console.warn("3D render unavailable", err); liveWorld.dispose(); liveWorld = null; } }
+      if (!w || !h) { frame = requestAnimationFrame(render); return; }
+      if (liveWorld) {
+        try {
+          rendered3d = liveWorld.render(ctx, w, h, now, livePeers.current, refs.current.stars.length);
+          if (!rendered3d) fallback("WebGL context unavailable");
+        } catch (err) { fallback(err); }
+      }
+      if (loading && !rendered3d) {
+        canvas.dataset.renderer = "loading";
+        ctx.fillStyle = "#030a1b"; ctx.fillRect(0, 0, w, h);
+        frame = requestAnimationFrame(render);
+        return;
+      }
+      if (rendered3d && loading) {
+        loading = false;
+        if (loadTimer !== undefined) window.clearTimeout(loadTimer);
+      }
+      if (!rendered3d) prepareFallback();
       if (rendered3d !== liveReady) { liveReady = rendered3d; onLiveReady(liveReady); }
       canvas.dataset.renderer = rendered3d ? "live-webgl" : "fallback";
       canvas.dataset.liveVisitors = rendered3d ? String(livePeers.current.length) : "0";
@@ -782,6 +824,11 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
         ctx.restore();
       }
 
+      // Reveal only after the first complete frame (including shared stars).
+      if (!published) {
+        published = true;
+        setSceneStatus(failed ? "fallback" : "ready");
+      }
       frame = requestAnimationFrame(render);
     }
 
@@ -855,7 +902,7 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
     }
     frame = requestAnimationFrame(render);
     meteorFrame = requestAnimationFrame(renderMeteors);
-    return () => { destroyed = true; liveWorld?.dispose(); cancelAnimationFrame(frame); cancelAnimationFrame(meteorFrame); resizeObserver.disconnect(); };
+    return () => { destroyed = true; if (loadTimer !== undefined) window.clearTimeout(loadTimer); liveWorld?.dispose(); cancelAnimationFrame(frame); cancelAnimationFrame(meteorFrame); resizeObserver.disconnect(); };
   }, [canvasRef, meteorCanvasRef, theme, livePeers, onLiveReady]);
 
   return <><canvas
@@ -878,5 +925,11 @@ export default function NightSky({ stars, glows, specialLink, liveStarIds, mySta
       const nearest = refs.current.stars.map((s) => ({ s, d: Math.hypot((s.x - x) * w, (s.y - y) * h) })).sort((a, b) => a.d - b.d)[0];
       if (nearest && nearest.d < 37) refs.current.onSelectStar(nearest.s.id);
     }}
-  /><canvas ref={meteorCanvasRef} className="meteor-layer" aria-hidden="true" /></>;
+  /><canvas ref={meteorCanvasRef} className="meteor-layer" aria-hidden="true" />
+    {theme === "forest" && sceneStatus === "loading" && <div role="status" aria-live="polite" style={{position:"absolute",inset:0,zIndex:1000,display:"grid",placeContent:"center",justifyItems:"center",gap:14,background:"#030a1b",color:"#c4e9e8",textAlign:"center",padding:24}}>
+      <span aria-hidden="true" style={{fontSize:28,lineHeight:1,color:"#e5f5ff"}}>✦</span>
+      <span style={{fontSize:13,letterSpacing:".04em"}}>별빛 풍경을 준비하고 있어요</span>
+    </div>}
+    {theme === "forest" && sceneStatus === "fallback" && <div role="status" style={{position:"absolute",zIndex:8,top:84,left:"50%",transform:"translateX(-50%)",padding:"6px 12px",borderRadius:12,fontSize:11,color:"#d1d9e7",background:"#071322c9",pointerEvents:"none",whiteSpace:"nowrap"}}>3D 연결이 어려워 기본 풍경을 표시합니다</div>}
+  </>;
 }
