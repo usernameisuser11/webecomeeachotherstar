@@ -78,10 +78,11 @@ function turfMaterial(blades,wind){
     float fine=turfNoise(q*vec2(42.,9.)+vec2(flow*2.8,0.));
     float micro=turfNoise(q*vec2(74.,24.));
     float footprint=max(length(dFdx(p)),length(dFdy(p)));
-    float fineFade=1.-smoothstep(.012,.065,footprint);
-    float microFade=1.-smoothstep(.008,.035,footprint);
-    float textureFactor=.78+.24*broad+.20*softSlope;
-    textureFactor+=(fine-.5)*.21*fineFade+(micro-.5)*.10*microFade;
+    float fineFade=1.-smoothstep(.025,.17,footprint);
+    float microFade=1.-smoothstep(.012,.075,footprint);
+    float middle=turfNoise(q*vec2(8.,3.2)+vec2(flow*1.6,0.));
+    float textureFactor=.72+.27*broad+.24*softSlope;
+    textureFactor+=(middle-.5)*.19+(fine-.5)*.30*fineFade+(micro-.5)*.13*microFade;
     vec3 col=vTint*textureFactor;
     #ifdef TURF_BLADES
      col*=mix(.73,1.36,smoothstep(.0,.98,vTip));
@@ -385,28 +386,46 @@ function tuftGeometry(seed,leaves,segments){
 // Packed 3D grass patches: leaves grow at separately jittered roots rather
 // than radiating out from one point. Near patches use more curved leaf segments.
 function lawnPatch(seed,segments,leaves){
- const r=random(seed),p=[],idx=[],tips=[];
+ const r=random(seed),p=[],idx=[],tips=[],colors=[];
  for(let n=0;n<leaves;n++){
   const rootX=(r()-.5)*1.6,rootZ=(r()-.5)*1.6;
   const angle=r()*TAU,dx=Math.cos(angle),dz=Math.sin(angle),bx=-dz,bz=dx;
-  const height=.66+r()*.51,bend=.14+r()*.52,w=.047+r()*.045;
+  const height=.69+r()*.47,bend=.16+r()*.53,w=.065+r()*.044;
+  const variation=.89+r()*.20;
   const start=p.length/3;
   for(let j=0;j<=segments;j++){
    const t=j/segments,x=rootX+dx*bend*t*t,z=rootZ+dz*bend*t*t,y=height*(t-.10*t*t*t);
    const half=w*Math.pow(1-t,.72);
    p.push(x-bx*half,y,z-bz*half,x+bx*half,y,z+bz*half);tips.push(t,t);
+   const shade=(.48+.70*Math.pow(t,.65))*variation;
+   colors.push(shade*.94,shade,shade*.89,shade*.94,shade,shade*.89);
    if(j<segments){const k=start+j*2;idx.push(k,k+1,k+2,k+1,k+3,k+2);}
   }
  }
  const g=new T.BufferGeometry();
  g.setAttribute("position",new T.Float32BufferAttribute(p,3));
- g.setAttribute("bladeFlex",new T.Float32BufferAttribute(tips,1));g.setIndex(idx);
+ g.setAttribute("bladeFlex",new T.Float32BufferAttribute(tips,1));g.setAttribute("color",new T.Float32BufferAttribute(colors,3));g.setIndex(idx);
  g.computeVertexNormals();return g;
 }
 function makeMeadow(scene,rand,small){
  const wind={value:0},r=random(923781),o=new T.Object3D();
- const mat=turfMaterial(true,wind);
- const deep=new T.Color("#264b23"),green=new T.Color("#608b40"),c=new T.Color();
+ // Three.js' standard instancing path handles geometry and colors; no custom
+ // instancing shader declarations. The only addition is gentle root-fixed wind.
+ const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
+ mat.onBeforeCompile=shader=>{
+  shader.uniforms.turfWind=wind;
+  shader.vertexShader=shader.vertexShader.replace("#include <common>","#include <common>\nuniform float turfWind;\nattribute float bladeFlex;")
+   .replace("#include <begin_vertex>",`#include <begin_vertex>
+    #ifdef USE_INSTANCING
+     vec2 q=instanceMatrix[3].xz;
+     float gust=sin(turfWind*.74-q.x*.31-q.y*.27);
+     transformed.x+=bladeFlex*bladeFlex*.055*gust;
+     transformed.z+=bladeFlex*bladeFlex*.035*gust;
+    #endif
+   `);
+ };
+ mat.customProgramCacheKey=()=>"visible-grass-basic-v1";
+ const deep=new T.Color("#305324"),green=new T.Color("#679845"),c=new T.Color();
  // Cache exact triangular heightfield. Thousands of patches can sample it
  // without evaluating fractal noise four times per patch.
  const nx=small?180:220,nz=Math.round(nx*.64),dx=140/nx,dz=100/nz;
@@ -418,18 +437,18 @@ function makeMeadow(scene,rand,small){
   return u+v<=1?a+(b-a)*u+(c-a)*v:d+(c-d)*(1-u)+(b-d)*(1-v);
  }
  const zones=[
-  {x0:-17,x1:17,z0:-7,z1:18,step:small?.215:.151,detail:3,leaves:6},
-  {x0:-34,x1:34,z0:-19,z1:25,step:small?.48:.34,detail:2,leaves:4}
+  {x0:-18,x1:18,z0:-8,z1:18,step:small?.23:.175,detail:3,leaves:9},
+  {x0:-35,x1:35,z0:-19,z1:25,step:small?.44:.34,detail:2,leaves:6}
  ];
  for(let k=0;k<zones.length;k++){
   const zone=zones[k],cols=Math.ceil((zone.x1-zone.x0)/zone.step),rows=Math.ceil((zone.z1-zone.z0)/zone.step),list=[];
   for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){
    const x=zone.x0+(i+r())*(zone.x1-zone.x0)/cols,z=zone.z0+(j+r())*(zone.z1-zone.z0)/rows;
-   if(k===1&&x>-17&&x<17&&z>-7&&z<18)continue;
+   if(k===1&&x>-18&&x<18&&z>-8&&z<18)continue;
    const y=heightAt(x,z);if(y<-.95)continue;
    const seating=Math.exp(-Math.pow((z+3)/3.1,2))*Math.exp(-Math.pow(x/12,4));
    const broad=noise(x*.20,z*.24,87),far=1-smoothstepLocal(-18,-8,z);
-   const h=(.058+.065*Math.pow(r(),1.35))*(.88+.25*broad)*(1-.24*seating)*(1-.28*far);
+   const h=(.12+.12*Math.pow(r(),1.25))*(.90+.18*broad)*(1-.35*seating)*(1-.28*far);
    list.push([x,y,z,h,broad]);
   }
   const mesh=new T.InstancedMesh(lawnPatch(717+k*97,zone.detail,zone.leaves),mat,list.length);
@@ -437,14 +456,14 @@ function makeMeadow(scene,rand,small){
    const [x,y,z,h,broad]=list[i];
    const yaw=r()*TAU;
    o.position.set(x,y-.008,z);o.rotation.set(0,yaw,0);
-   o.scale.set(zone.step*(.56+r()*.15),h,zone.step*(.56+r()*.15));
+   o.scale.set(zone.step*(.66+r()*.12),h,zone.step*(.66+r()*.12));
    o.updateMatrix();mesh.setMatrixAt(i,o.matrix);
    const coarse=fbm(x*.075,z*.095,17),fine=noise(x*.42,z*.55,79);
-   const blend=clamp(.31+coarse*.40+fine*.08+(r()-.5)*.16,0,1);
-   c.copy(deep).lerp(green,blend);mesh.setColorAt(i,c);
+   const blend=clamp(.31+coarse*.40+fine*.08+(r()-.5)*.19,0,1);
+   c.copy(deep).lerp(green,blend).multiplyScalar(.86+.17*broad);mesh.setColorAt(i,c);
   }
   mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;
-  mesh.computeBoundingSphere();scene.add(mesh);
+  mesh.computeBoundingSphere();mesh.frustumCulled=false;scene.add(mesh);
  }
  return wind;
 }
