@@ -123,11 +123,11 @@ async function checkContextRestoration(page) {
 }
 
 await seedSky();
-const socket = new WebSocket("ws://127.0.0.1:8787/presence/starlight");
+const socket = new WebSocket("ws://127.0.0.1:8787/presence/starlight", { headers: { Origin: new URL(base).origin } });
 await new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error("Test visitor could not join")), 10000);
   socket.addEventListener("open", () => { clearTimeout(timeout); resolve(); }, { once: true });
-  socket.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("Test visitor connection failed")); }, { once: true });
+  socket.addEventListener("error", event => { clearTimeout(timeout); reject(event.error ?? new Error("Test visitor connection failed")); }, { once: true });
 });
 
 try {
