@@ -21,7 +21,8 @@ function nearBank(x){
  return -18.3+4.9*Math.sin(x*.102-.32)+1.47*Math.sin(x*.225+.31)+(noise(x*.21,0,113)-.5)*1.35;
 }
 function farBank(x){
- return -43.3+6.2*Math.sin(x*.069+1.02)-3.2*Math.cos(x*.133-.3)+(noise(x*.14,0,192)-.5)*1.55;
+ return -43.3+6.2*Math.sin(x*.069+1.02)-3.2*Math.cos(x*.133-.3)+(noise(x*.14,0,192)-.5)*1.55
+  -1.23*Math.exp(-Math.pow((x-5)/13,2))+.61*Math.sin(x*.27+.8);
 }
 function ground(x,z){
  const distance=z-nearBank(x);
@@ -46,7 +47,9 @@ function distantBank(x,z){
  const eastShoulder=2.10*Math.exp(-Math.pow((x-15-d*.29)/12,2)-Math.pow((d-22)/11,2));
  const foothills=smoothstepLocal(4,18,d)*(1-smoothstepLocal(41,73,d))
   *(.41+1.31*terrace+rolls+westShoulder+eastShoulder);
- const bankDetail=.21*(fbm(x*.29,z*.37,193)-.48)*smoothstepLocal(0,3,d);
+ const relief=smoothstepLocal(4.5,11,d)*Math.exp(-Math.pow((d-12)/13,2));
+ const gullies=.20*Math.sin(x*.145+z*.22)+.23*(fbm(x*.18,z*.22,815)-.5);
+ const bankDetail=.21*(fbm(x*.29,z*.37,193)-.48)*smoothstepLocal(0,3,d)+relief*gullies;
  return WATER_LEVEL+ledge+foothills+bankDetail;
 }
 // Shared, restrained meadow lighting. Green albedo is not overwritten by the
@@ -430,7 +433,55 @@ function makeDistantGroundCover(scene,small){
   o.position.set(x,y-.045,z);o.rotation.set(0,r()*TAU,0);
   const w=spacing*(.65+r()*.14);o.scale.set(w,h,w);o.updateMatrix();
   mesh.setMatrixAt(i,o.matrix);
-  mesh.setColorAt(i,farBankTint(x,z,y).multiplyScalar(.94+.12*p));
+  mesh.setColorAt(i,farBankTint(x,z,y).multiplyScalar(.92+.21*p));
+ });
+ mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+ mesh.computeBoundingSphere();scene.add(mesh);
+}
+
+function makeFarShoreStones(scene,small){
+ const r=random(136172),o=new T.Object3D(),sites=[];
+ const g=new T.IcosahedronGeometry(1,2),p=g.attributes.position;
+ for(let i=0;i<p.count;i++){
+  const x=p.getX(i),y=p.getY(i),z=p.getZ(i),k=.76+.31*fbm(x*2.6,z*2.2+y,519);
+  p.setXYZ(i,x*k,y*k,z*k);
+ }
+ g.computeVertexNormals();
+ const n=small?30:55,groups=[-31,-14,9,28,42];
+ for(let i=0;i<n;i++){
+  const x=groups[i%groups.length]+(r()-.5)*9.5,z=farBank(x)-3.7-r()*3.9,y=distantBank(x,z);
+  if(y<WATER_LEVEL+.10||y>.50)continue;
+  sites.push([x,y,z,.12+Math.pow(r(),2)*.31]);
+ }
+ const mat=new T.MeshStandardMaterial({color:"#ffffff",roughness:1,side:T.DoubleSide});
+ const mesh=new T.InstancedMesh(g,mat,sites.length),a=new T.Color("#4e6254"),b=new T.Color("#777d68");
+ sites.forEach(([x,y,z,size],i)=>{
+  o.position.set(x,y-.04,z);o.rotation.set(r()*.35,r()*TAU,r()*.20);
+  o.scale.set(size*(1.3+r()*.5),size*.45,size*(.7+r()*.4));o.updateMatrix();
+  mesh.setMatrixAt(i,o.matrix);mesh.setColorAt(i,a.clone().lerp(b,r()*.75));
+ });
+ mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+ mesh.computeBoundingSphere();mesh.layers.enable(1);scene.add(mesh);
+}
+
+function makeFieldTransition(scene,small){
+ const r=random(55491),o=new T.Object3D(),items=[];
+ const centers=[[-26,7],[-18,9],[-10,7.2],[3.5,8.0],[13,6.5],[22,7.8],[30,6.0]];
+ for(const [cx,offset] of centers){
+  const count=small?18:32;
+  for(let j=0;j<count;j++){
+   const x=cx+(r()-.5)*3.8,z=nearBank(x)+offset+(r()-.5)*2.5;
+   const y=ground(x,z);if(y<-.80||z>-6)continue;
+   items.push([x,y,z,.13+.17*r(),r()]);
+  }
+ }
+ const g=lawnPatch(1307,3,9);
+ const mat=new T.MeshBasicMaterial({color:"#ffffff",vertexColors:true,side:T.DoubleSide,toneMapped:false,fog:false});
+ const mesh=new T.InstancedMesh(g,mat,items.length),dark=new T.Color("#315326"),light=new T.Color("#668a41");
+ items.forEach(([x,y,z,h,t],i)=>{
+  o.position.set(x,y-.018,z);o.rotation.set(0,r()*TAU,0);
+  const width=.17+r()*.12;o.scale.set(width,h,width);o.updateMatrix();
+  mesh.setMatrixAt(i,o.matrix);mesh.setColorAt(i,dark.clone().lerp(light,t*.65));
  });
  mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
  mesh.computeBoundingSphere();scene.add(mesh);
@@ -860,6 +911,7 @@ export function createLiveOverlook(){
  shadeTerrainAtTrees(farTerrain,farTrees);
  const setGrassQuality=makeMeadow(scene,small,heightAt,meadowTrees,wind);
  makeDistantGroundCover(scene,small);
+ makeFarShoreStones(scene,small);
  makeRocks(scene,heightAt);
  makeRiverEdges(scene,small,heightAt);
  makeFieldTransition(scene,small,heightAt);
